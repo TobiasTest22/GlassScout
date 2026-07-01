@@ -7,19 +7,19 @@ import { groupSquad, positionGroups } from "@/domain/live-data";
 import { LiveDataState } from "@/components/live-data-state";
 
 function PlayerRow({ player }: { player: LivePlayer }) {
+  const goalsPer90 = player.per90?.goalsPer90;
+  const assistsPer90 = player.per90?.assistsPer90;
   return (
-    <article className="squad-player-row">
+    <article className="squad-player-row squad-player-row-rich">
       <div><strong>{player.name}</strong><small>{player.age ?? "Age unknown"} · {player.nationality ?? "Nationality unknown"}</small></div>
-      <span>{player.positions.join(" / ") || "Unknown"}</span>
-      <span>{player.bestRole ?? "Unknown"}</span>
-      <span>{player.form ?? "—"}<small>{player.averageRating == null ? "Rating —" : `Rating ${player.averageRating.toFixed(2)}`}</small></span>
-      <span>{player.minutesPlayed ?? "—"}<small>{player.goals ?? "—"} G · {player.assists ?? "—"} A</small></span>
-      <span>{player.contractStatus ?? "Unknown"}<small>{player.value ?? "Value unknown"} · {player.wage ?? "Wage unknown"}</small></span>
-      <span>{player.tacticalFit == null ? "—" : `${player.tacticalFit}%`}<small>{player.squadImportance ?? "Importance unknown"}</small></span>
-      <span className={`trend-${player.developmentTrend ?? "unknown"}`}>
-        {player.developmentTrend === "improving" ? <ArrowUp /> : player.developmentTrend === "declining" ? <ArrowDown /> : <Activity />}
-        {player.developmentTrend ?? "Unknown"}
-      </span>
+      <span>{player.positions.join(" / ") || "Unknown"}<small>Calculated: {player.bestCalculatedPosition ?? "Unavailable"}</small></span>
+      <span>{player.bestRole ?? "Unavailable"}<small>{player.roleFit == null ? "Fit unavailable" : `${player.roleFit}% role fit`}</small></span>
+      <span>{player.tacticalFit == null ? "—" : `${player.tacticalFit}%`}<small>Tactical fit</small></span>
+      <span>{player.value ?? "Unknown"}<small>{player.truePrice == null ? "True price unavailable" : `True price €${player.truePrice}m`}</small></span>
+      <span>{player.wage ?? "Unknown"}<small>{player.contractStatus ?? "Contract unknown"}</small></span>
+      <span>{goalsPer90 == null ? "G/90 —" : `${goalsPer90} G/90`}<small>{assistsPer90 == null ? "A/90 —" : `${assistsPer90} A/90`} · {player.averageRating == null ? "rating —" : player.averageRating.toFixed(2)}</small></span>
+      <span className={`knowledge-${player.scoutKnowledge ?? "unknown"}`}>{(player.scoutKnowledge ?? "unknown").replaceAll("_", " ")}<small>{player.riskLevel ?? "unknown"} data risk</small></span>
+      <span>{player.retrainingSuggestion ?? "No retraining signal"}<small>{player.roleReasoning?.join(" · ") || "Insufficient visible attributes"}</small></span>
     </article>
   );
 }
@@ -52,20 +52,20 @@ export function MyTeamScreen({
   return (
     <main className="screen my-team-screen">
       <div className="planner-heading">
-        <div><h1>My Team</h1><p>{managedClub?.name} · {snapshot.season} · {squad.length} current players</p></div>
-        <div className="live-source-label"><span className="live-dot" />Current FM26 squad</div>
+        <div><h1>My Team</h1><p>{managedClub?.name} · {snapshot.season ?? "Imported snapshot"} · {squad.length} current players</p></div>
+        <div className="live-source-label"><span className="live-dot" />{snapshot.dataSource === "export-watcher" ? "Export Watcher" : "Live Memory"}</div>
       </div>
 
       <section className="squad-summary-grid">
-        <article><UsersRound /><span><small>Best XI mapped</small><strong>{snapshot.tactic?.slots.filter((slot) => slot.playerId).length ?? 0} / 11</strong></span></article>
+        <article><UsersRound /><span><small>Players analysed</small><strong>{squad.length}</strong></span></article>
         <article><ArrowUp /><span><small>Improving</small><strong>{improving}</strong></span></article>
         <article><ArrowDown /><span><small>Declining</small><strong>{declining}</strong></span></article>
         <article><ShieldAlert /><span><small>Contracts to review</small><strong>{expiring}</strong></span></article>
         <article><Activity /><span><small>Low tactical fit</small><strong>{lowFit}</strong></span></article>
       </section>
 
-      <section className="squad-live-table">
-        <header><span>Player</span><span>Position</span><span>Best role</span><span>Form</span><span>Minutes / output</span><span>Contract / cost</span><span>Tactical fit</span><span>Trend</span></header>
+      <section className="squad-live-table squad-live-table-rich">
+        <header><span>Player</span><span>Position</span><span>Best role</span><span>Fit</span><span>Value / true price</span><span>Wage / contract</span><span>Per 90</span><span>Knowledge</span><span>Retraining</span></header>
         {positionGroups.map((group) => {
           const players = groups.get(group) ?? [];
           if (players.length === 0) return null;
@@ -81,10 +81,10 @@ export function MyTeamScreen({
       <section className="squad-analysis-live">
         <h2>Squad analysis</h2>
         <div>
-          <article><strong>Best XI</strong><p>{snapshot.tactic ? `${snapshot.tactic.formation} loaded from FM26 with ${snapshot.tactic.slots.filter((slot) => slot.playerId).length} assigned players.` : "Current tactic is not readable."}</p></article>
-          <article><strong>Squad depth</strong><p>{positionGroups.map((group) => `${group}: ${groups.get(group)?.length ?? 0}`).join(" · ")}</p></article>
-          <article><strong>Development</strong><p>{improving} improving · {declining} declining · {squad.length - improving - declining} stable or unknown.</p></article>
-          <article><strong>Recruitment needs</strong><p>{lowFit ? `${lowFit} players currently fall below 65% tactical fit.` : "No low-fit players were identified in readable data."}</p></article>
+          <article><strong>Best XI</strong><p>{snapshot.tactic ? `${snapshot.tactic.formation} loaded with ${snapshot.tactic.slots.filter((slot) => slot.playerId).length} assigned players.` : "Current tactic is unavailable in this export."}</p></article>
+          <article><strong>Role depth</strong><p>{positionGroups.map((group) => `${group}: ${groups.get(group)?.length ?? 0}`).join(" · ")}</p></article>
+          <article><strong>Knowledge</strong><p>{squad.filter((player) => player.scoutKnowledge === "fully_known").length} fully known · {squad.filter((player) => player.scoutKnowledge === "needs_scouting").length} need scouting.</p></article>
+          <article><strong>Recruitment needs</strong><p>{lowFit ? `${lowFit} players fall below 65% calculated fit.` : "No low-fit players were identified in available visible data."}</p></article>
         </div>
       </section>
     </main>

@@ -19,6 +19,14 @@ export type LiveConnectorStatus = {
   lastSync: string | null;
   bytesRead: number;
   executableHeaderValid: boolean;
+  gameBuild?: string | null;
+  productVersion?: string | null;
+  executableSha256?: string | null;
+  architecture?: string | null;
+  moduleBase?: string | null;
+  entityMapStatus?: "missing" | "matched" | "invalid" | "not_checked";
+  entityMapProfileId?: string | null;
+  pointerValidation?: "not_run" | "passed" | "failed";
   canWriteMemory: false;
   message: string;
   warnings: string[];
@@ -52,6 +60,18 @@ export type LivePlayer = {
   loanInterest: string | null;
   transferAvailable: boolean | null;
   loanAvailable: boolean | null;
+  attributes?: Record<string, number | null>;
+  per90?: Record<string, number | null>;
+  scoutKnowledge?: "fully_known" | "partly_known" | "unknown" | "needs_scouting" | "missing_data";
+  bestCalculatedPosition?: string | null;
+  truePrice?: number | null;
+  fairPriceRange?: [number, number] | null;
+  valuationLabel?: "undervalued" | "fair" | "overpriced" | "unavailable";
+  valuationReasoning?: string[];
+  retrainingSuggestion?: string | null;
+  roleReasoning?: string[];
+  riskLevel?: "low" | "medium" | "high" | "unknown";
+  marketValueAmount?: number | null;
 };
 
 export type LiveClub = {
@@ -85,6 +105,8 @@ export type LiveFootballSnapshot = {
   players: LivePlayer[];
   tactic: LiveTactic | null;
   dataError: string | null;
+  dataSource?: "none" | "live-memory" | "export-watcher";
+  dataWarnings?: string[];
 };
 
 export interface FootballDataAdapter {
@@ -112,6 +134,14 @@ const browserPreviewStatus: LiveConnectorStatus = {
   lastSync: null,
   bytesRead: 0,
   executableHeaderValid: false,
+  gameBuild: null,
+  productVersion: null,
+  executableSha256: null,
+  architecture: null,
+  moduleBase: null,
+  entityMapStatus: "not_checked",
+  entityMapProfileId: null,
+  pointerValidation: "not_run",
   canWriteMemory: false,
   message: "Browser previews cannot inspect Windows process memory. Install and open the Windows app to use the local FM26 connector.",
   warnings: ["No live data is being simulated. The browser preview never substitutes sample players."],
@@ -147,6 +177,8 @@ export const fm26LiveAdapter: FootballDataAdapter = {
         players: [],
         tactic: null,
         dataError: browserPreviewStatus.message,
+        dataSource: "none",
+        dataWarnings: browserPreviewStatus.warnings,
       };
     }
 
@@ -164,6 +196,8 @@ export const fm26LiveAdapter: FootballDataAdapter = {
         players: [],
         tactic: null,
         dataError: message,
+        dataSource: "none",
+        dataWarnings: [message],
       };
     }
   },

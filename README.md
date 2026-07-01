@@ -14,7 +14,9 @@ The desktop connector can currently:
 
 The connector cannot yet locate FM26's active-save entities for the installed 2026 build. Managed team, players, clubs, attributes and tactics therefore remain unreadable. Every data collection returned by the connector is empty; the UI shows a connection/data error and never substitutes demo records.
 
-This is an honest pre-release foundation, not a claim that FM26 save extraction is complete. See [FM26 live-memory research](docs/fm26-live-memory-research.md).
+The installed build is `6000.0.52.8888375`, x64 Unity IL2CPP. GlassScout now fingerprints the executable and requires an exact versioned entity-map match before following any pointer. See [FM26 parser investigation](docs/fm26-parser-investigation.md).
+
+When no verified map exists, **Export Watcher** is the supported workflow. It imports FM26 visible-column CSV exports in the browser or desktop app, can refresh a user-selected folder every five seconds, and feeds My Team, Recruitment, Role DNA and valuation screens without exposing hidden values.
 
 ## Desktop product surfaces
 
@@ -22,7 +24,8 @@ This is an honest pre-release foundation, not a claim that FM26 save extraction 
 - Current Tactic, roles, duties, instructions, conflicts and squad-fit analysis when readable.
 - Recruitment filters over the live player pool.
 - Favorited Players with add/remove, notes, filtering, sorting and comparison. Favorites store only player IDs and resolve against the newest live snapshot.
-- Memory Center diagnostics for process, memory, parser and active-save readiness.
+- Data / Sync Status with exact build fingerprint, entity-map status, CSV import and browser folder watching.
+- Role DNA / Position Converter and transparent true-price estimation from visible attributes and performance.
 - No CSV flow, Import Center, fake team, placeholder player, seeded database or static fallback data.
 
 ## Install the Windows test build

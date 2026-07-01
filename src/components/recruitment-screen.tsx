@@ -66,7 +66,7 @@ export function RecruitmentScreen({
   return (
     <main className="screen live-recruitment-screen">
       <div className="planner-heading">
-        <div><h1>Recruitment</h1><p>Live players extracted from the active FM26 save.</p></div>
+        <div><h1>Recruitment / Player Search</h1><p>Players from the current verified Live Memory or Export Watcher dataset.</p></div>
         <div className="live-source-label"><span className="live-dot" />Synced {snapshot.status.lastSync}</div>
       </div>
 
@@ -81,7 +81,7 @@ export function RecruitmentScreen({
       </section>
 
       <div className="player-pool-toolbar">
-        <span>{players.length} live players</span>
+        <span>{players.length} available players</span>
         <label>Sort by
           <select aria-label="Sort recruitment players" value={sort} onChange={(event) => setSort(event.target.value as SortKey)}>
             <option value="roleFit">Role fit</option>
@@ -93,7 +93,7 @@ export function RecruitmentScreen({
       </div>
 
       <section className="live-player-table recruitment-live-table">
-        <header><span>Player</span><span>Best role</span><span>Interest</span><span>Availability</span><span>Role fit</span><span>Value / wage</span><span>Favorite</span></header>
+        <header><span>Player</span><span>Best role</span><span>Interest</span><span>Availability</span><span>Role fit</span><span>FM / true price</span><span>Favorite</span></header>
         {players.map((player) => {
           const club = player.clubId ? clubById.get(player.clubId) : null;
           return (
@@ -103,13 +103,16 @@ export function RecruitmentScreen({
               <div className="interest-cell"><span>{player.transferInterest ?? "Unknown"}</span><small>Loan: {player.loanInterest ?? "Unknown"}</small></div>
               <div className="availability-cell"><span>{player.transferAvailable === true ? "Transfer" : player.loanAvailable === true ? "Loan" : "Not listed"}</span></div>
               <div className="role-fit-cell"><strong>{player.roleFit == null ? "—" : `${player.roleFit}%`}</strong><small>Tactical {player.tacticalFit == null ? "—" : `${player.tacticalFit}%`}</small></div>
-              <div className="money-cell"><strong>{player.value ?? "Unknown"}</strong><small>{player.wage ?? "Wage unknown"}</small></div>
+              <div className="money-cell">
+                <strong>{player.value ?? "FM value unknown"}</strong>
+                <small>{player.truePrice == null ? "True price unavailable" : `True price €${player.truePrice}m`}</small>
+              </div>
               <Button variant={favoriteIds.has(player.id) ? "secondary" : "outline"} size="icon-sm" aria-label={`${favoriteIds.has(player.id) ? "Remove" : "Add"} ${player.name} favorite`} onClick={() => onToggleFavorite(player.id)}><Star /></Button>
             </article>
           );
         })}
       </section>
-      <div className="recruitment-footnote"><ArrowDownUp />All values above come from the current live snapshot; missing fields remain unknown.</div>
+      <div className="recruitment-footnote"><ArrowDownUp />Missing fields remain unavailable; hidden-value columns are never imported.</div>
     </main>
   );
 }
