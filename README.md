@@ -8,31 +8,34 @@ The desktop connector can currently:
 
 - detect a running `fm.exe` process;
 - open it with query and VM-read permissions only;
-- resolve the executable path;
-- read and validate the executable `MZ` header;
-- return an explicit structured error when the active save entity map is unavailable.
+- require an exact file version, product version, architecture and SHA-256 match;
+- resolve the active human manager, managed club and current squad;
+- read live player identity and positional familiarity for the managed team;
+- validate signatures, object types, collection bounds and pointer chains before returning entities.
 
-The connector cannot yet locate FM26's active-save entities for the installed 2026 build. Managed team, players, clubs, attributes and tactics therefore remain unreadable. Every data collection returned by the connector is empty; the UI shows a connection/data error and never substitutes demo records.
+Version `0.1.3` supports FM26 `6000.0.52.8888375`, product `6000.0.52f1-fm26-05f1 (87a0370e9917)`, x64, executable SHA-256 `3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73`.
 
-The installed build is `6000.0.52.8888375`, x64 Unity IL2CPP. GlassScout now fingerprints the executable and requires an exact versioned entity-map match before following any pointer. See [FM26 parser investigation](docs/fm26-parser-investigation.md).
+Live-memory tactic reading is disabled and cannot block squad/player connection. The user may choose one `.fmf` tactic file through the native Windows file picker. GlassScout validates and copies that file into local app data, then reports whether its format can be decoded. The current FM26 FMF container is recognized but not yet fully decoded, so no formation, role, duty or tactic-fit result is guessed.
+
+Age, attributes, form, contracts, wages, valuations and FM26's own shortlist are not yet mapped safely for this exact build. GlassScout leaves those fields empty and explains the limitation. It does not read or return CA, PA or hidden attributes.
 
 GlassScout is live-game only. When the installed FM26 build has no verified entity map, the application shows a clean blocking connection state and does not substitute another data source.
 
 ## Desktop product surfaces
 
-- My Team, grouped by live FM26 position data when available.
-- Current Tactic, roles, duties, instructions, conflicts and squad-fit analysis when readable.
+- My Team, grouped by validated live FM26 position data.
+- Tactic Evaluation with a user-selected `.fmf` file, local app-data storage and honest parser status.
 - Recruitment filters over the live player pool.
 - Favorited Players with add/remove, notes, filtering, sorting and comparison. Favorites store only player IDs and resolve against the newest live snapshot.
 - Advanced diagnostics under Settings with the exact build fingerprint and entity-map status.
 - Role DNA / Position Converter and transparent true-price estimation from visible attributes and performance.
-- No alternate data flow, fake team, placeholder player, seeded database or static fallback data.
+- No alternate data flow, fake team, placeholder player or seeded database.
 
 ## Install the Windows test build
 
-Download [GlassScout FM26 0.1.1 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.1/GlassScout.FM26_0.1.1_x64-setup.exe).
+Download [GlassScout FM26 0.1.3 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.3/GlassScout.FM26_0.1.3_x64-setup.exe).
 
-The NSIS setup installs GlassScout locally and uses Tauri's WebView2 bootstrapper when the required Windows web runtime is missing. The prerelease is not code-signed yet, so Windows SmartScreen may ask for confirmation. Installing the desktop app enables the local connector; it does not make the still-unverified active-save entity parser complete.
+The NSIS setup installs GlassScout locally and uses Tauri's WebView2 bootstrapper when the required Windows web runtime is missing. The prerelease is not code-signed yet, so Windows SmartScreen may ask for confirmation.
 
 ## Development
 
@@ -62,4 +65,4 @@ powershell -ExecutionPolicy Bypass -File scripts/fm26-read-probe.ps1
 - `.github/workflows/desktop-release.yml` creates a draft prerelease.
 - Every application change must include a version bump, a rebuilt Windows installer, an installed-app launch check, and an updated release download.
 
-Releases must remain prerelease until active-save detection and entity extraction are verified against the installed FM26 build.
+The exact-build map must be revalidated whenever FM26 changes.

@@ -26,8 +26,6 @@ export function DashboardScreen({
   const club = snapshot.clubs.find((item) => item.id === snapshot.managedClubId);
   const squad = snapshot.players.filter((player) => player.clubId === snapshot.managedClubId);
   const groups = groupSquad(squad);
-  const fittedPlayers = squad.filter((player) => player.tacticalFit != null);
-  const averageFit = fittedPlayers.length ? Math.round(fittedPlayers.reduce((sum, player) => sum + (player.tacticalFit ?? 0), 0) / fittedPlayers.length) : null;
   const weakest = squad.filter((player) => player.roleFit != null).toSorted((a, b) => (a.roleFit ?? 0) - (b.roleFit ?? 0)).slice(0, 4);
   const retraining = squad.filter((player) => player.retrainingSuggestion).toSorted((a, b) => (b.roleFit ?? 0) - (a.roleFit ?? 0)).slice(0, 4);
   const undervalued = squad.filter((player) => player.valuationLabel === "undervalued").toSorted((a, b) => (b.truePrice ?? 0) - (a.truePrice ?? 0)).slice(0, 4);
@@ -42,8 +40,8 @@ export function DashboardScreen({
 
       <section className="live-overview-grid dashboard-overview-rich">
         <button onClick={() => onNavigate("My Team")}><UsersRound /><span><small>Current squad</small><strong>{squad.length} players</strong></span></button>
-        <button onClick={() => onNavigate("Tactic Evaluation")}><Target /><span><small>Current tactic fit</small><strong>{averageFit == null ? "Unavailable" : `${averageFit}%`}</strong></span></button>
-        <button onClick={() => onNavigate("Settings")}><Database /><span><small>Last live sync</small><strong>{snapshot.status.lastSync ? new Date(snapshot.status.lastSync).toLocaleTimeString() : "Not synced"}</strong></span></button>
+        <button onClick={() => onNavigate("Tactic Evaluation")}><Target /><span><small>Current tactic</small><strong>{snapshot.tactic?.formation ?? "Unavailable"}</strong></span></button>
+        <button onClick={() => onNavigate("Settings")}><Database /><span><small>Last live sync</small><strong>{snapshot.status.lastSync ? new Date(Number(snapshot.status.lastSync)).toLocaleTimeString() : "Not synced"}</strong></span></button>
         <button onClick={() => onNavigate("Role DNA")}><TrendingUp /><span><small>Retraining candidates</small><strong>{retraining.length}</strong></span></button>
       </section>
 
@@ -54,7 +52,6 @@ export function DashboardScreen({
         <article><header><Database /><h2>Undervalued players</h2></header>{undervalued.length ? undervalued.map((player) => <span key={player.id}><strong>{player.name}</strong><small>{player.value} FM value · €{player.truePrice}m estimate</small></span>) : <p>No transparent undervaluation signal in available data.</p>}</article>
       </section>
 
-      {snapshot.dataWarnings?.length ? <section className="dashboard-data-warnings"><h2>Data warnings</h2>{snapshot.dataWarnings.map((warning) => <p key={warning}>{warning}</p>)}</section> : null}
     </motion.main>
   );
 }
