@@ -1,0 +1,22 @@
+# dependencies and generated frontend output
+node_modules/
+.next/
+out/
+
+# Rust/Tauri output
+src-tauri/target/
+
+# local environment and editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# logs and test artifacts
+*.log
+coverage/
+test-results/
+playwright-report/
