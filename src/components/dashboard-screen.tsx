@@ -36,14 +36,14 @@ export function DashboardScreen({
   return (
     <motion.main className="screen dashboard-screen" initial={false} animate={{ opacity: 1 }}>
       <div className="page-intro">
-        <div><h1>{club?.name ?? "Managed team"}</h1><p>{snapshot.season ?? "Imported FM26 snapshot"} · {snapshot.dataSource === "export-watcher" ? "Export Watcher" : "Live Memory"}</p></div>
+        <div><h1>{club?.name ?? "Managed team"}</h1><p>{snapshot.season ?? "Active FM26 save"} · Live game data</p></div>
         <div className="heading-actions"><Button variant="outline" onClick={onRefresh} disabled={checking}><RefreshCw data-icon="inline-start" />Refresh</Button><Button onClick={() => onNavigate("Recruitment")}>Open recruitment<ArrowRight data-icon="inline-end" /></Button></div>
       </div>
 
       <section className="live-overview-grid dashboard-overview-rich">
         <button onClick={() => onNavigate("My Team")}><UsersRound /><span><small>Current squad</small><strong>{squad.length} players</strong></span></button>
         <button onClick={() => onNavigate("Tactic Evaluation")}><Target /><span><small>Current tactic fit</small><strong>{averageFit == null ? "Unavailable" : `${averageFit}%`}</strong></span></button>
-        <button onClick={() => onNavigate("Data / Sync Status")}><Database /><span><small>Last data sync</small><strong>{snapshot.status.lastSync ? new Date(snapshot.status.lastSync).toLocaleTimeString() : "Not synced"}</strong></span></button>
+        <button onClick={() => onNavigate("Settings")}><Database /><span><small>Last live sync</small><strong>{snapshot.status.lastSync ? new Date(snapshot.status.lastSync).toLocaleTimeString() : "Not synced"}</strong></span></button>
         <button onClick={() => onNavigate("Role DNA")}><TrendingUp /><span><small>Retraining candidates</small><strong>{retraining.length}</strong></span></button>
       </section>
 

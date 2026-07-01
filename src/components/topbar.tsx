@@ -8,14 +8,13 @@ import type { LiveConnectorStatus } from "@/domain/adapters";
 
 export function Topbar({ search, onSearch, connection }: { search: string; onSearch: (value: string) => void; connection: LiveConnectorStatus }) {
   const connected = connection.state === "connected";
-  const liveMemory = connected && connection.entityMapStatus === "matched";
   return (
     <header className="topbar">
       <div className="search-wrap">
         <Search aria-hidden="true" />
         <Input
           aria-label="Search players and reports"
-          placeholder={connected ? "Search players and reports…" : "Connect Live Memory or Export Watcher to search"}
+          placeholder={connected ? "Search players and reports…" : "Waiting for FM26 live data"}
           value={search}
           onChange={(event) => onSearch(event.target.value)}
           disabled={!connected}
@@ -25,7 +24,7 @@ export function Topbar({ search, onSearch, connection }: { search: string; onSea
       <div className="topbar-actions">
         <Badge variant="outline" className="sync-badge">
           <span className={connected ? "live-dot" : "neutral-dot"} />
-          {liveMemory ? "Live Memory" : connected ? "Export Watcher synced" : connection.processDetected ? "FM26 detected · entity map missing" : "FM26 diagnostics"}
+          {connected ? "FM26 live" : connection.processDetected ? "FM26 detected · connection blocked" : "Waiting for FM26"}
         </Badge>
         <Button variant="outline" size="icon" aria-label={connected ? "Football data connected" : "FM26 data requires attention"}>
           {connected ? <Wifi /> : <WifiOff />}

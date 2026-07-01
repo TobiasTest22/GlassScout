@@ -56,8 +56,8 @@ export function MyTeamScreen({
   return (
     <main className="screen my-team-screen">
       <div className="planner-heading">
-        <div><h1>My Team</h1><p>{managedClub?.name} · {snapshot.season ?? "Imported snapshot"} · {squad.length} current players</p></div>
-        <div className="live-source-label"><span className="live-dot" />{snapshot.dataSource === "export-watcher" ? "Export Watcher" : "Live Memory"}</div>
+        <div><h1>My Team</h1><p>{managedClub?.name} · {snapshot.season ?? "Active FM26 save"} · {squad.length} current players</p></div>
+        <div className="live-source-label"><span className="live-dot" />Live FM26</div>
       </div>
 
       <section className="squad-summary-grid">

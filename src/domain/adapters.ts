@@ -105,7 +105,7 @@ export type LiveFootballSnapshot = {
   players: LivePlayer[];
   tactic: LiveTactic | null;
   dataError: string | null;
-  dataSource?: "none" | "live-memory" | "export-watcher";
+  dataSource?: "none" | "live-memory";
   dataWarnings?: string[];
 };
 
@@ -121,7 +121,7 @@ export interface FutureRealLifeAdapter {
   readonly providerRequired: "licensed-provider";
 }
 
-const browserPreviewStatus: LiveConnectorStatus = {
+const desktopRequiredStatus: LiveConnectorStatus = {
   processDetected: false,
   processId: null,
   processPath: null,
@@ -143,15 +143,15 @@ const browserPreviewStatus: LiveConnectorStatus = {
   entityMapProfileId: null,
   pointerValidation: "not_run",
   canWriteMemory: false,
-  message: "Browser previews cannot inspect Windows process memory. Install and open the Windows app to use the local FM26 connector.",
-  warnings: ["No live data is being simulated. The browser preview never substitutes sample players."],
+  message: "GlassScout requires the installed Windows app to connect to the active FM26 game.",
+  warnings: ["No live data is being simulated."],
 };
 
 export const fm26LiveAdapter: FootballDataAdapter = {
   kind: "fm26-live",
   async getStatus() {
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
-      return browserPreviewStatus;
+      return desktopRequiredStatus;
     }
 
     try {
@@ -159,7 +159,7 @@ export const fm26LiveAdapter: FootballDataAdapter = {
       return await invoke<LiveConnectorStatus>("connector_status");
     } catch (error) {
       return {
-        ...browserPreviewStatus,
+        ...desktopRequiredStatus,
         state: "access_denied",
         memoryAccess: "denied",
         message: error instanceof Error ? error.message : "The desktop connector could not be reached.",
@@ -169,16 +169,16 @@ export const fm26LiveAdapter: FootballDataAdapter = {
   async getSnapshot() {
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
       return {
-        status: browserPreviewStatus,
+        status: desktopRequiredStatus,
         managedClubId: null,
         managerName: null,
         season: null,
         clubs: [],
         players: [],
         tactic: null,
-        dataError: browserPreviewStatus.message,
+        dataError: desktopRequiredStatus.message,
         dataSource: "none",
-        dataWarnings: browserPreviewStatus.warnings,
+        dataWarnings: desktopRequiredStatus.warnings,
       };
     }
 
@@ -188,7 +188,7 @@ export const fm26LiveAdapter: FootballDataAdapter = {
     } catch (error) {
       const message = error instanceof Error ? error.message : "The desktop connector could not be reached.";
       return {
-        status: { ...browserPreviewStatus, state: "access_denied", memoryAccess: "denied", message },
+        status: { ...desktopRequiredStatus, state: "access_denied", memoryAccess: "denied", message },
         managedClubId: null,
         managerName: null,
         season: null,

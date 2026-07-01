@@ -16,7 +16,7 @@ The connector cannot yet locate FM26's active-save entities for the installed 20
 
 The installed build is `6000.0.52.8888375`, x64 Unity IL2CPP. GlassScout now fingerprints the executable and requires an exact versioned entity-map match before following any pointer. See [FM26 parser investigation](docs/fm26-parser-investigation.md).
 
-When no verified map exists, **Export Watcher** is the supported workflow. It imports FM26 visible-column CSV exports in the browser or desktop app, can refresh a user-selected folder every five seconds, and feeds My Team, Recruitment, Role DNA and valuation screens without exposing hidden values.
+GlassScout is live-game only. When the installed FM26 build has no verified entity map, the application shows a clean blocking connection state and does not substitute another data source.
 
 ## Desktop product surfaces
 
@@ -24,13 +24,13 @@ When no verified map exists, **Export Watcher** is the supported workflow. It im
 - Current Tactic, roles, duties, instructions, conflicts and squad-fit analysis when readable.
 - Recruitment filters over the live player pool.
 - Favorited Players with add/remove, notes, filtering, sorting and comparison. Favorites store only player IDs and resolve against the newest live snapshot.
-- Data / Sync Status with exact build fingerprint, entity-map status, CSV import and browser folder watching.
+- Advanced diagnostics under Settings with the exact build fingerprint and entity-map status.
 - Role DNA / Position Converter and transparent true-price estimation from visible attributes and performance.
-- No CSV flow, Import Center, fake team, placeholder player, seeded database or static fallback data.
+- No alternate data flow, fake team, placeholder player, seeded database or static fallback data.
 
 ## Install the Windows test build
 
-Download [GlassScout FM26 0.1.0 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.0/GlassScout.FM26_0.1.0_x64-setup.exe).
+Download [GlassScout FM26 0.1.1 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.1/GlassScout.FM26_0.1.1_x64-setup.exe).
 
 The NSIS setup installs GlassScout locally and uses Tauri's WebView2 bootstrapper when the required Windows web runtime is missing. The prerelease is not code-signed yet, so Windows SmartScreen may ask for confirmation. Installing the desktop app enables the local connector; it does not make the still-unverified active-save entity parser complete.
 
@@ -44,7 +44,7 @@ npm run build
 npm run dev
 ```
 
-The web target is only a UI preview. Live FM26 inspection requires the Tauri desktop runtime:
+Live FM26 inspection requires the Tauri desktop runtime:
 
 ```powershell
 npm run desktop:dev
@@ -60,5 +60,6 @@ powershell -ExecutionPolicy Bypass -File scripts/fm26-read-probe.ps1
 
 - `.github/workflows/ci.yml` validates frontend and Rust tests on Windows.
 - `.github/workflows/desktop-release.yml` creates a draft prerelease.
+- Every application change must include a version bump, a rebuilt Windows installer, an installed-app launch check, and an updated release download.
 
 Releases must remain prerelease until active-save detection and entity extraction are verified against the installed FM26 build.

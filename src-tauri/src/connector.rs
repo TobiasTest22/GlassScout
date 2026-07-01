@@ -96,7 +96,7 @@ pub fn connector_snapshot() -> ConnectorSnapshot {
     let data_error = if status.process_detected && status.executable_header_valid {
         match status.entity_map_status {
             "missing" => format!(
-                "FM26 {} is readable, but no verified entity-map profile matches this exact executable. Use Export Watcher for real visible data while a profile is researched.",
+                "FM26 {} is readable, but no verified entity-map profile matches this exact executable. Live player, club and tactic extraction is blocked safely.",
                 status.game_build.as_deref().unwrap_or("build unknown")
             ),
             "invalid" => "The matching entity map failed signature or pointer validation. Live extraction was stopped before reading entities.".to_string(),
@@ -196,7 +196,7 @@ fn build_status() -> ConnectorStatus {
         message,
         warnings: vec![
             "No verified profile means no save-root, player, club or tactic pointers are followed.".to_string(),
-            "Export Watcher accepts only user-exported visible columns and blocks hidden-value columns.".to_string(),
+            "Player, club and tactic extraction was not attempted because entity-map validation did not pass.".to_string(),
         ],
     }
 }

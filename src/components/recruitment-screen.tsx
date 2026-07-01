@@ -68,7 +68,7 @@ export function RecruitmentScreen({
   return (
     <main className="screen live-recruitment-screen">
       <div className="planner-heading">
-        <div><h1>Recruitment / Player Search</h1><p>Players from the current verified Live Memory or Export Watcher dataset.</p></div>
+        <div><h1>Recruitment / Player Search</h1><p>Players read from the current active FM26 game.</p></div>
         <div className="live-source-label"><span className="live-dot" />Synced {snapshot.status.lastSync}</div>
       </div>
 
@@ -117,7 +117,7 @@ export function RecruitmentScreen({
           );
         })}
       </section>
-      <div className="recruitment-footnote"><ArrowDownUp />Missing fields remain unavailable; hidden-value columns are never imported.</div>
+      <div className="recruitment-footnote"><ArrowDownUp />Missing fields remain unavailable; scout-knowledge restrictions apply to every evaluation.</div>
     </main>
   );
 }

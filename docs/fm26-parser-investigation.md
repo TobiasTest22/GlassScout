@@ -52,18 +52,6 @@ Current commercial/community live scouts demonstrate that extraction is possible
 
 ### Unity / BepInEx
 
-The installed game is a 64-bit Unity IL2CPP build. BepInEx IL2CPP can inject plugins and generate interop wrappers, but it modifies the game launch path and is sensitive to Unity/metadata updates. That is too invasive and fragile for GlassScout's default connector. A user-chosen export plugin can still be used to create visible-column CSV files; GlassScout only consumes the resulting files.
+The installed game is a 64-bit Unity IL2CPP build. BepInEx IL2CPP can inject plugins and generate interop wrappers, but it modifies the game launch path and is sensitive to Unity/metadata updates. That is too invasive and fragile for GlassScout's connector.
 
-### Export Watcher
-
-This is the implemented reliable fallback. Users may select CSV files or grant a browser folder handle. GlassScout:
-
-- detects semicolon, comma, or tab delimiters;
-- refreshes a selected folder every five seconds;
-- maps common FM26 visible columns;
-- discards CA, PA, and hidden personality/consistency columns;
-- derives per-90 values only when minutes and totals are visible;
-- computes role DNA and transparent valuation only from imported visible fields;
-- keeps unavailable metrics unavailable.
-
-No existing FM26 export files were found in this user's Sports Interactive documents folders during the local test, so a manual FM26 export is still required for real squad ingestion.
+GlassScout remains focused on the external read-only process connector. If exact entity-map validation fails, the application blocks football-data screens rather than substituting another source.

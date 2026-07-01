@@ -2,7 +2,6 @@
 
 import {
   BrainCircuit,
-  Database,
   Dna,
   Gauge,
   LayoutDashboard,
@@ -24,7 +23,6 @@ export type Screen =
   | "Recruitment"
   | "Favorites / Shortlist"
   | "Player Profile"
-  | "Data / Sync Status"
   | "Settings";
 
 const navigation = [
@@ -34,7 +32,6 @@ const navigation = [
   { label: "Role DNA", icon: Dna },
   { label: "Recruitment", icon: ListChecks },
   { label: "Favorites / Shortlist", icon: Star },
-  { label: "Data / Sync Status", icon: Database },
   { label: "Settings", icon: Settings },
 ] satisfies { label: Screen; icon: typeof Gauge }[];
 

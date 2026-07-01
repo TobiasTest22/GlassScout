@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AppSidebar, type Screen } from "@/components/app-sidebar";
 import { Topbar } from "@/components/topbar";
@@ -10,14 +10,12 @@ import { TacticsScreen } from "@/components/tactics-screen";
 import { RoleDnaScreen } from "@/components/role-dna-screen";
 import { RecruitmentScreen } from "@/components/recruitment-screen";
 import { FavoritedPlayersScreen } from "@/components/favorited-players-screen";
-import { DataSyncScreen } from "@/components/data-sync-screen";
 import { PlayerProfileScreen } from "@/components/player-profile-screen";
 import { StartupScreen } from "@/components/startup-screen";
 import { SettingsScreen } from "@/components/settings-screen";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { fm26LiveAdapter, type LiveConnectorStatus, type LiveFootballSnapshot } from "@/domain/adapters";
 import { toggleFavorite, updateFavoriteNote, type FavoriteRecord } from "@/domain/live-data";
-import type { ExportDiagnostics } from "@/domain/export-watcher";
 
 const initialStatus: LiveConnectorStatus = {
   processDetected: false,
@@ -64,7 +62,6 @@ export function GlassScoutApp() {
   const [search, setSearch] = useState("");
   const [connection, setConnection] = useState<LiveConnectorStatus>(initialStatus);
   const [snapshot, setSnapshot] = useState<LiveFootballSnapshot>(initialSnapshot);
-  const [exportDiagnostics, setExportDiagnostics] = useState<ExportDiagnostics | null>(null);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<FavoriteRecord[]>(() => {
     if (typeof window === "undefined") return [];
@@ -83,20 +80,23 @@ export function GlassScoutApp() {
     window.localStorage.setItem("glassscout-favorites-v1", JSON.stringify(favorites));
   }, [favorites]);
 
-  const checkConnection = async () => {
+  const checkConnection = useCallback(async () => {
     setChecking(true);
-    const nextSnapshot = await fm26LiveAdapter.getSnapshot();
-    setSnapshot(nextSnapshot);
-    setConnection(nextSnapshot.status);
-    setChecking(false);
-    return nextSnapshot.status;
-  };
+    try {
+      const nextSnapshot = await fm26LiveAdapter.getSnapshot();
+      setSnapshot(nextSnapshot);
+      setConnection(nextSnapshot.status);
+      return nextSnapshot.status;
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+  const enterWorkspace = useCallback((status: LiveConnectorStatus) => {
+    setConnection(status);
+    setScreen("Dashboard");
+    setMode("fm26");
+  }, []);
 
-  const acceptExportSnapshot = (nextSnapshot: LiveFootballSnapshot, diagnostics: ExportDiagnostics) => {
-    setSnapshot(nextSnapshot);
-    setConnection(nextSnapshot.status);
-    setExportDiagnostics(diagnostics);
-  };
   const togglePlayerFavorite = (playerId: string) => setFavorites((current) => toggleFavorite(current, playerId));
   const updatePlayerNote = (playerId: string, note: string) => setFavorites((current) => updateFavoriteNote(current, playerId, note));
   const openPlayer = (playerId: string) => {
@@ -107,11 +107,7 @@ export function GlassScoutApp() {
   if (mode === null) {
     return (
       <TooltipProvider>
-        <StartupScreen onConnect={checkConnection} onEnter={(status) => {
-          setConnection(status);
-          if (status.entityMapStatus !== "matched") setScreen("Data / Sync Status");
-          setMode("fm26");
-        }} />
+        <StartupScreen onConnect={checkConnection} onEnter={enterWorkspace} />
       </TooltipProvider>
     );
   }
@@ -124,7 +120,6 @@ export function GlassScoutApp() {
     screen === "Recruitment" ? <RecruitmentScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
     screen === "Favorites / Shortlist" ? <FavoritedPlayersScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onUpdateNote={updatePlayerNote} /> :
     screen === "Player Profile" ? <PlayerProfileScreen player={snapshot.players.find((player) => player.id === selectedPlayerId) ?? null} snapshot={snapshot} onBack={() => setScreen("Recruitment")} /> :
-    screen === "Data / Sync Status" ? <DataSyncScreen status={connection} snapshot={snapshot} diagnostics={exportDiagnostics} checking={checking} onCheck={checkConnection} onImport={acceptExportSnapshot} /> :
     <SettingsScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} />;
 
   return (

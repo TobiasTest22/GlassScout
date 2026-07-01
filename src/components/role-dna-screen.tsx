@@ -26,7 +26,7 @@ export function RoleDnaScreen({ snapshot, checking, onRefresh }: { snapshot: Liv
           </article>
         ))}
       </section>
-      <div className="recruitment-footnote"><RefreshCw />Scores update whenever Export Watcher imports a newer file.</div>
+      <div className="recruitment-footnote"><RefreshCw />Scores update whenever GlassScout reads a newer live-game snapshot.</div>
     </main>
   );
 }

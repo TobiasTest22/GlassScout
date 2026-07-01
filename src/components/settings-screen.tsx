@@ -1,6 +1,6 @@
 "use client";
 
-import { Database, LockKeyhole, RefreshCw } from "lucide-react";
+import { ChevronDown, Cpu, Database, LockKeyhole, RefreshCw } from "lucide-react";
 import type { LiveFootballSnapshot } from "@/domain/adapters";
 import { Button } from "@/components/ui/button";
 
@@ -13,13 +13,35 @@ export function SettingsScreen({
   checking: boolean;
   onRefresh: () => Promise<unknown>;
 }) {
+  const status = snapshot.status;
   return (
     <main className="screen settings-screen">
-      <div className="planner-heading"><div><h1>Settings</h1><p>Desktop connector and local-data controls.</p></div></div>
+      <div className="planner-heading">
+        <div><h1>Settings</h1><p>Live FM26 connector and local application controls.</p></div>
+      </div>
       <section className="settings-list">
-        <article><Database /><div><strong>FM26 executable</strong><span>{snapshot.status.processPath ?? "Not detected"}</span></div><Button variant="outline" onClick={onRefresh} disabled={checking}><RefreshCw data-icon="inline-start" />Check now</Button></article>
-        <article><LockKeyhole /><div><strong>Memory permissions</strong><span>Query and read access only. Writing to FM26 memory is not implemented.</span></div><b>{snapshot.status.memoryAccess.replaceAll("_", " ")}</b></article>
+        <article><Database /><div><strong>Active FM26 game</strong><span>{status.processDetected ? "Football Manager 26 detected" : "Waiting for FM26"}</span></div><Button variant="outline" onClick={onRefresh} disabled={checking}><RefreshCw data-icon="inline-start" className={checking ? "spin" : undefined} />Check now</Button></article>
+        <article><LockKeyhole /><div><strong>Memory safety</strong><span>Query and read access only. GlassScout cannot write to FM26.</span></div><b>{status.memoryAccess.replaceAll("_", " ")}</b></article>
       </section>
+
+      <details className="advanced-diagnostics">
+        <summary><span><Cpu />Advanced diagnostics</span><ChevronDown /></summary>
+        <p>Technical connection details for troubleshooting unsupported FM26 builds.</p>
+        <dl>
+          <div><dt>Process</dt><dd>{status.processDetected ? `Detected · PID ${status.processId}` : "Not detected"}</dd></div>
+          <div><dt>Executable</dt><dd>{status.processPath ?? "Unavailable"}</dd></div>
+          <div><dt>FM26 build</dt><dd>{status.gameBuild ?? "Unavailable"}</dd></div>
+          <div><dt>Product version</dt><dd>{status.productVersion ?? "Unavailable"}</dd></div>
+          <div><dt>Architecture</dt><dd>{status.architecture ?? "Unavailable"}</dd></div>
+          <div><dt>Module base</dt><dd>{status.moduleBase ?? "Unavailable"}</dd></div>
+          <div><dt>Memory probe</dt><dd>{status.executableHeaderValid ? `Passed · ${status.bytesRead} bytes` : "Not verified"}</dd></div>
+          <div><dt>Entity map</dt><dd>{status.entityMapStatus === "matched" ? status.entityMapProfileId : status.entityMapStatus ?? "Not checked"}</dd></div>
+          <div><dt>Pointer validation</dt><dd>{status.pointerValidation?.replaceAll("_", " ") ?? "Not run"}</dd></div>
+          <div><dt>Active save</dt><dd>{status.saveDetected === true ? "Detected" : "Not readable"}</dd></div>
+          <div className="diagnostic-hash"><dt>Executable SHA-256</dt><dd>{status.executableSha256 ?? "Unavailable"}</dd></div>
+        </dl>
+        <div className="advanced-diagnostic-message"><strong>Connector result</strong><span>{status.message}</span></div>
+      </details>
     </main>
   );
 }
