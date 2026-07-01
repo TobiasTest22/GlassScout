@@ -25,6 +25,12 @@ This is an honest pre-release foundation, not a claim that FM26 save extraction 
 - Memory Center diagnostics for process, memory, parser and active-save readiness.
 - No CSV flow, Import Center, fake team, placeholder player, seeded database or static fallback data.
 
+## Install the Windows test build
+
+Download [GlassScout FM26 0.1.0 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.0/GlassScout.FM26_0.1.0_x64-setup.exe).
+
+The NSIS setup installs GlassScout locally and uses Tauri's WebView2 bootstrapper when the required Windows web runtime is missing. The prerelease is not code-signed yet, so Windows SmartScreen may ask for confirmation. Installing the desktop app enables the local connector; it does not make the still-unverified active-save entity parser complete.
+
 ## Development
 
 ```powershell

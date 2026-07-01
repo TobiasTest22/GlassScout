@@ -561,17 +561,24 @@ h1, h2, h3, [data-slot="card-title"] { font-family: "Segoe UI", Arial, sans-seri
 .mode-card li svg { width: 18px; color: var(--mint); stroke-width: 1.6; }
 .mode-card-disabled li svg { color: #9aa7b5; }
 .mode-card > button { height: 42px; }
+.mode-actions { display: grid; grid-template-columns: 1.25fr 1fr; gap: 8px; margin-top: auto; }
+.mode-actions > * { min-height: 42px; }
+.setup-download { box-shadow: 0 7px 18px rgba(8,124,112,.16); }
 .mode-card > small { margin-top: 11px; color: #74849a; text-align: center; font-size: 8px; }
 .startup-diagnostics { display: grid; grid-template-columns: 220px 1fr auto; align-items: center; gap: 14px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 14px; background: rgba(255,255,255,.7); }
 .startup-diagnostics h2 { margin: 0; font-size: 12px; }
-.startup-diagnostics > div { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
-.startup-diagnostics > div span { display: grid; grid-template-columns: 15px 1fr; gap: 2px 6px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; }
+.diagnostic-cells { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.diagnostic-cells span { display: grid; grid-template-columns: 15px 1fr; gap: 2px 6px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; }
 .startup-diagnostics svg { grid-row: span 2; width: 13px; color: #718398; }
 .startup-diagnostics strong, .startup-diagnostics b { font-size: 7px; }
 .startup-diagnostics b { color: #8794a5; font-weight: 550; text-transform: capitalize; }
 .startup-diagnostics .diag-good { color: #008b77; }.startup-diagnostics .diag-watch { color: #b1761b; }
 .startup-diagnostics p { grid-column: 1 / -1; display: block; margin: 0; padding-top: 7px; border-top: 1px solid var(--border); color: var(--slate); font-size: 8px; line-height: 1.45; }
 .startup-diagnostics button { white-space: nowrap; }
+.diagnostic-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-start; gap: 7px; }
+.diagnostic-actions > * { white-space: nowrap; }
+.release-notes-link { display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; color: var(--primary); font-size: 8px; font-weight: 700; text-decoration: none; }
+.release-notes-link svg { width: 11px; }
 .trust-strip { display: flex; align-items: center; justify-content: center; gap: 50px; padding: 13px; color: #35506b; font-size: 10px; font-weight: 650; }
 .trust-strip span { display: flex; align-items: center; gap: 8px; }
 .trust-strip svg { width: 17px; color: var(--mint); }

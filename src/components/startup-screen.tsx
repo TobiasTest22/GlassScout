@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Check, CircleDot, Database, Globe2, LockKeyhole, ShieldCheck, UsersRound } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Check, CircleDot, Database, Download, ExternalLink, Globe2, LockKeyhole, MonitorDown, ShieldCheck, UsersRound } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import type { LiveConnectorStatus } from "@/domain/adapters";
+import { windowsInstallerUrl, windowsReleaseUrl } from "@/domain/distribution";
+import { cn } from "@/lib/utils";
 
 const waitingStatus: LiveConnectorStatus = {
   processDetected: false,
@@ -32,6 +34,7 @@ export function StartupScreen({
 }) {
   const [checking, setChecking] = useState(false);
   const [status, setStatus] = useState(waitingStatus);
+  const browserPreview = status.message.startsWith("Browser previews cannot inspect");
 
   const connect = async () => {
     setChecking(true);
@@ -49,26 +52,31 @@ export function StartupScreen({
 
       <header className="startup-heading">
         <h1>Choose your data world</h1>
-        <p>GlassScout keeps every recommendation tied to what your recruitment team actually knows.</p>
+        <p>Use the browser for a safe preview, or install the Windows app for local FM26 access.</p>
       </header>
 
       <section className="mode-grid">
         <article className="mode-card mode-card-active">
           <div className="mode-card-title">
             <span className="mode-icon">FM<br />26</span>
-            <div><h2>Football Manager 2026</h2><strong>Supported now</strong></div>
+            <div><h2>Football Manager 2026</h2><strong>Windows test build</strong></div>
           </div>
-          <p>Connect to a running FM26 save through a local, read-only memory adapter.</p>
+          <p>The installed app runs locally and can request read-only access to the active FM26 process.</p>
           <ul>
-            <li><UsersRound />Live squad and player data</li>
-            <li><ShieldCheck />Scout knowledge preserved</li>
+            <li><UsersRound />Desktop squad and player pipeline</li>
+            <li><MonitorDown />Windows setup includes GlassScout</li>
             <li><LockKeyhole />No game-state writes</li>
           </ul>
-          <Button onClick={connect} disabled={checking}>
-            <Database data-icon="inline-start" />
-            {checking ? "Checking FM26…" : "Connect to FM26"}
-          </Button>
-          <small>FM data reflects the game database, not guaranteed real-life accuracy.</small>
+          <div className="mode-actions">
+            <a className={cn(buttonVariants({ size: "lg" }), "setup-download")} href={windowsInstallerUrl}>
+              <Download data-icon="inline-start" />Download Windows setup
+            </a>
+            <Button variant="outline" size="lg" onClick={connect} disabled={checking}>
+              <Database data-icon="inline-start" />
+              {checking ? "Checking…" : "Check this environment"}
+            </Button>
+          </div>
+          <small>Windows 10/11 x64 · test prerelease · WebView2 is installed automatically when required.</small>
         </article>
 
         <article className="mode-card mode-card-disabled" data-disabled="true">
@@ -88,8 +96,8 @@ export function StartupScreen({
       </section>
 
       <section className="startup-diagnostics" aria-live="polite">
-        <h2>Connection diagnostics</h2>
-        <div>
+        <h2>{browserPreview ? "Browser preview" : "Connection diagnostics"}</h2>
+        <div className="diagnostic-cells">
           <span><CircleDot /><strong>Process</strong><b className={status.processDetected ? "diag-good" : ""}>{status.processDetected ? `Detected · PID ${status.processId}` : "Waiting"}</b></span>
           <span><Database /><strong>Memory access</strong><b className={status.memoryAccess === "read_only_handle_open" ? "diag-good" : ""}>{status.memoryAccess.replaceAll("_", " ")}</b></span>
           <span><Check /><strong>Parser</strong><b className={status.parserStatus === "ready" ? "diag-good" : "diag-watch"}>{status.parserStatus}</b></span>
@@ -97,10 +105,17 @@ export function StartupScreen({
         </div>
         <p>{status.message}</p>
         {status.state !== "not_checked" ? (
-          <Button variant="outline" onClick={() => onEnter(status)}>
-            Open FM26 workspace
-          </Button>
-        ) : null}
+          <div className="diagnostic-actions">
+            {browserPreview ? (
+              <a className={buttonVariants()} href={windowsInstallerUrl}><Download data-icon="inline-start" />Install desktop connector</a>
+            ) : null}
+            <Button variant="outline" onClick={() => onEnter(status)}>
+              {browserPreview ? "Continue browser preview" : "Open FM26 workspace"}
+            </Button>
+          </div>
+        ) : (
+          <a className="release-notes-link" href={windowsReleaseUrl} target="_blank" rel="noreferrer">Release notes <ExternalLink /></a>
+        )}
       </section>
 
       <footer className="trust-strip">

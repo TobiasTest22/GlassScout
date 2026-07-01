@@ -113,8 +113,8 @@ const browserPreviewStatus: LiveConnectorStatus = {
   bytesRead: 0,
   executableHeaderValid: false,
   canWriteMemory: false,
-  message: "Desktop connector unavailable in browser preview. Run the Tauri app to inspect FM26.",
-  warnings: ["No live data is being simulated."],
+  message: "Browser previews cannot inspect Windows process memory. Install and open the Windows app to use the local FM26 connector.",
+  warnings: ["No live data is being simulated. The browser preview never substitutes sample players."],
 };
 
 export const fm26LiveAdapter: FootballDataAdapter = {
