@@ -5,5 +5,5 @@ import nextTs from "eslint-config-next/typescript";
 export default defineConfig([
   ...nextVitals,
   ...nextTs,
-  globalIgnores([".next/**", "out/**"]),
+  globalIgnores([".next/**", "out/**", "src-tauri/target/**"]),
 ]);

@@ -5,6 +5,7 @@ out/
 
 # Rust/Tauri output
 src-tauri/target/
+src-tauri/gen/
 
 # local environment and editor files
 .env

@@ -1,7 +1,13 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{fs::File, io::Read, path::Path, sync::OnceLock};
+
+const READ_ONLY_PROCESS_ACCESS: u32 = 0x1410;
+const MAX_STRING_BYTES: usize = 192;
+const POSITION_NAMES: [&str; 13] = [
+    "GK", "SW", "DL", "DC", "DR", "DM", "WBL", "MC", "WBR", "AML", "AMR", "AMC", "ST",
+];
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +33,15 @@ pub struct ConnectorStatus {
     entity_map_status: &'static str,
     entity_map_profile_id: Option<String>,
     pointer_validation: &'static str,
+    handle_access_flags: &'static str,
+    entity_root: Option<String>,
+    save_pointer: Option<String>,
+    managed_club_pointer: Option<String>,
+    player_collection_pointer: Option<String>,
+    live_memory_tactic_read: &'static str,
+    failure_stage: Option<String>,
+    last_successful_read: Option<String>,
+    windows_error_code: Option<u32>,
     message: String,
     warnings: Vec<String>,
 }
@@ -41,7 +56,13 @@ pub struct ConnectorSnapshot {
     clubs: Vec<Value>,
     players: Vec<Value>,
     tactic: Option<Value>,
+    tactic_source: &'static str,
+    tactic_file_status: &'static str,
+    tactic_file_name: Option<String>,
+    tactic_file_warnings: Vec<String>,
     data_error: Option<String>,
+    data_source: &'static str,
+    data_warnings: Vec<String>,
 }
 
 #[derive(Default)]
@@ -70,6 +91,7 @@ struct EntityMapProfile {
     module: String,
     signatures: Vec<EntitySignature>,
     pointer_chains: Vec<PointerChain>,
+    constants: MapConstants,
 }
 
 #[derive(Deserialize)]
@@ -85,27 +107,108 @@ struct PointerChain {
     offsets: Vec<u64>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MapConstants {
+    manager_registry_vector_offset: u64,
+    human_person_offset: u64,
+    person_first_name_offset: u64,
+    person_second_name_offset: u64,
+    person_common_name_offset: u64,
+    person_contract_offset: u64,
+    contract_team_offset: u64,
+    team_vtable_rva: u64,
+    team_club_offset: u64,
+    team_players_start_offset: u64,
+    team_players_end_offset: u64,
+    club_vtable_rva: u64,
+    club_name_offset: u64,
+    entity_uid_offset: u64,
+    player_person_offset: u64,
+    player_positions_offset: u64,
+}
+
+#[derive(Default)]
+struct ExtractionDiagnostics {
+    entity_root: Option<u64>,
+    save_pointer: Option<u64>,
+    managed_club_pointer: Option<u64>,
+    player_collection_pointer: Option<u64>,
+    last_successful_read: Option<String>,
+}
+
+struct LiveData {
+    managed_club_id: String,
+    manager_name: String,
+    clubs: Vec<Value>,
+    players: Vec<Value>,
+    warnings: Vec<String>,
+}
+
+struct ExtractionFailure {
+    stage: &'static str,
+    message: String,
+    windows_error_code: Option<u32>,
+}
+
+impl ExtractionFailure {
+    fn new(stage: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            stage,
+            message: message.into(),
+            windows_error_code: None,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn connector_status() -> ConnectorStatus {
-    build_status()
+    connector_snapshot().status
 }
 
 #[tauri::command]
 pub fn connector_snapshot() -> ConnectorSnapshot {
-    let status = build_status();
-    let data_error = if status.process_detected && status.executable_header_valid {
-        match status.entity_map_status {
-            "missing" => format!(
-                "FM26 {} is readable, but no verified entity-map profile matches this exact executable. Live player, club and tactic extraction is blocked safely.",
-                status.game_build.as_deref().unwrap_or("build unknown")
-            ),
-            "invalid" => "The matching entity map failed signature or pointer validation. Live extraction was stopped before reading entities.".to_string(),
-            _ => "The active save could not be validated safely.".to_string(),
-        }
-    } else {
-        status.message.clone()
-    };
+    collect_snapshot()
+}
 
+fn empty_status() -> ConnectorStatus {
+    ConnectorStatus {
+        process_detected: false,
+        process_id: None,
+        process_path: None,
+        save_detected: None,
+        memory_access: "not_checked",
+        parser_status: "unverified",
+        state: "process_not_found",
+        players_loaded: 0,
+        clubs_loaded: 0,
+        last_sync: None,
+        bytes_read: 0,
+        executable_header_valid: false,
+        can_write_memory: false,
+        game_build: None,
+        product_version: None,
+        executable_sha256: None,
+        architecture: None,
+        module_base: None,
+        entity_map_status: "not_checked",
+        entity_map_profile_id: None,
+        pointer_validation: "not_run",
+        handle_access_flags: "PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ (0x1410)",
+        entity_root: None,
+        save_pointer: None,
+        managed_club_pointer: None,
+        player_collection_pointer: None,
+        live_memory_tactic_read: "disabled",
+        failure_stage: None,
+        last_successful_read: None,
+        windows_error_code: None,
+        message: "FM26 is not running. Open FM26 and load your save to begin.".to_string(),
+        warnings: Vec::new(),
+    }
+}
+
+fn empty_snapshot(status: ConnectorStatus, error: String) -> ConnectorSnapshot {
     ConnectorSnapshot {
         status,
         managed_club_id: None,
@@ -114,91 +217,540 @@ pub fn connector_snapshot() -> ConnectorSnapshot {
         clubs: Vec::new(),
         players: Vec::new(),
         tactic: None,
-        data_error: Some(data_error),
+        tactic_source: "none",
+        tactic_file_status: "not_imported",
+        tactic_file_name: None,
+        tactic_file_warnings: Vec::new(),
+        data_error: Some(error),
+        data_source: "none",
+        data_warnings: Vec::new(),
     }
 }
 
-fn build_status() -> ConnectorStatus {
-    let process = find_fm26_process();
-    let process_id = process.as_ref().map(|item| item.0);
-    let mut process_path = process.as_ref().and_then(|item| item.1.clone());
-    let probe = process_id.map(probe_process_memory).unwrap_or_default();
-    if process_path.is_none() {
-        process_path = probe.process_path.clone();
-    }
+#[cfg(target_os = "windows")]
+fn collect_snapshot() -> ConnectorSnapshot {
+    let Some((process_id, _)) = find_fm26_process() else {
+        let status = empty_status();
+        return empty_snapshot(status.clone(), status.message);
+    };
 
-    let identity = process_path
+    let mut status = empty_status();
+    status.process_detected = true;
+    status.process_id = Some(process_id);
+
+    let mut reader = match ProcessReader::open(process_id) {
+        Ok(reader) => reader,
+        Err(code) => {
+            status.state = "access_denied";
+            status.memory_access = "denied";
+            status.windows_error_code = Some(code);
+            status.failure_stage = Some("open_read_only_process".to_string());
+            status.message =
+                "FM26 is running, but GlassScout could not open its read-only connection."
+                    .to_string();
+            return empty_snapshot(status.clone(), status.message);
+        }
+    };
+    status.memory_access = "read_only_handle_open";
+    status.process_path = reader.process_path();
+
+    let identity = status
+        .process_path
         .as_deref()
         .map(read_executable_identity)
         .unwrap_or_default();
-    let entity_map = find_entity_map(&identity);
-    let entity_map_status = if entity_map.is_some() {
-        "invalid"
-    } else {
-        "missing"
-    };
+    status.game_build = identity.file_version.clone();
+    status.product_version = identity.product_version.clone();
+    status.executable_sha256 = identity.sha256.clone();
+    status.architecture = identity.architecture.clone();
 
-    let (state, memory_access, message) = match (process_id, probe.handle_open, probe.header_valid) {
-        (None, _, _) => (
-            "process_not_found",
-            "not_checked",
-            "FM26 is not running. Start the game and load a save, then run diagnostics.".to_string(),
-        ),
-        (Some(_), false, _) => (
-            "access_denied",
-            "denied",
-            "FM26 is running, but GlassScout could not open a read-only process handle.".to_string(),
-        ),
-        (Some(pid), true, true) if entity_map.is_none() => (
-            "parser_unverified",
-            "read_only_handle_open",
-            format!(
-                "FM26 process {pid} is readable. Build {} has no matching verified entity map; live entity traversal is disabled safely.",
-                identity.file_version.as_deref().unwrap_or("unknown")
-            ),
-        ),
-        (Some(pid), true, true) => (
-            "parser_unverified",
-            "read_only_handle_open",
-            format!(
-                "FM26 process {pid} is readable and a profile matched, but signature and pointer validation are not implemented for that profile."
-            ),
-        ),
-        (Some(pid), true, false) => (
-            "parser_unverified",
-            "read_only_handle_open",
-            format!("FM26 process {pid} opened read-only, but the executable memory probe did not validate."),
-        ),
+    let Some(profile) = find_entity_map(&identity) else {
+        status.state = "parser_unverified";
+        status.entity_map_status = "missing";
+        status.failure_stage = Some("exact_build_match".to_string());
+        status.last_successful_read = Some("read_executable_identity".to_string());
+        status.bytes_read = reader.bytes_read;
+        status.message = format!(
+            "FM26 build {} is not supported safely yet. No game data was shown.",
+            identity.file_version.as_deref().unwrap_or("unknown")
+        );
+        return empty_snapshot(status.clone(), status.message);
     };
+    status.entity_map_status = "matched";
+    status.entity_map_profile_id = Some(profile.id.clone());
 
-    ConnectorStatus {
-        process_detected: process_id.is_some(),
-        process_id,
-        process_path,
-        save_detected: None,
-        memory_access,
-        parser_status: "unverified",
-        state,
-        players_loaded: 0,
-        clubs_loaded: 0,
-        last_sync: None,
-        bytes_read: probe.bytes_read,
-        executable_header_valid: probe.header_valid,
-        can_write_memory: false,
-        game_build: identity.file_version,
-        product_version: identity.product_version,
-        executable_sha256: identity.sha256,
-        architecture: identity.architecture,
-        module_base: probe.module_base,
-        entity_map_status,
-        entity_map_profile_id: entity_map.map(|profile| profile.id.clone()),
-        pointer_validation: "not_run",
-        message,
-        warnings: vec![
-            "No verified profile means no save-root, player, club or tactic pointers are followed.".to_string(),
-            "Player, club and tactic extraction was not attempted because entity-map validation did not pass.".to_string(),
-        ],
+    let Some(module) = reader.module(&profile.module) else {
+        status.state = "parser_unverified";
+        status.pointer_validation = "failed";
+        status.failure_stage = Some("locate_game_module".to_string());
+        status.last_successful_read = Some("match_exact_build".to_string());
+        status.windows_error_code = reader.last_error;
+        status.bytes_read = reader.bytes_read;
+        status.message =
+            "The FM26 game module was not available. No game data was shown.".to_string();
+        return empty_snapshot(status.clone(), status.message);
+    };
+    status.module_base = Some(hex_address(module.base));
+    let header = reader.read_bytes(module.base, 2);
+    status.executable_header_valid = header.as_deref() == Some(b"MZ");
+    if !status.executable_header_valid {
+        status.state = "parser_unverified";
+        status.pointer_validation = "failed";
+        status.failure_stage = Some("validate_game_module".to_string());
+        status.last_successful_read = Some("locate_game_module".to_string());
+        status.bytes_read = reader.bytes_read;
+        status.message =
+            "The FM26 game module could not be validated. No game data was shown.".to_string();
+        return empty_snapshot(status.clone(), status.message);
     }
+
+    let mut diagnostics = ExtractionDiagnostics::default();
+    let extracted = extract_live_data(&mut reader, module, profile, &mut diagnostics);
+    status.bytes_read = reader.bytes_read;
+    status.entity_root = diagnostics.entity_root.map(hex_address);
+    status.save_pointer = diagnostics.save_pointer.map(hex_address);
+    status.managed_club_pointer = diagnostics.managed_club_pointer.map(hex_address);
+    status.player_collection_pointer = diagnostics.player_collection_pointer.map(hex_address);
+    status.last_successful_read = diagnostics.last_successful_read;
+
+    match extracted {
+        Ok(data) => {
+            status.save_detected = Some(true);
+            status.parser_status = "ready";
+            status.state = "connected";
+            status.players_loaded = data.players.len() as u32;
+            status.clubs_loaded = data.clubs.len() as u32;
+            status.pointer_validation = "passed";
+            status.last_sync = Some(unix_milliseconds());
+            status.message = format!(
+                "Connected to {} with {} live squad players.",
+                data.clubs
+                    .first()
+                    .and_then(|club| club.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("the managed club"),
+                data.players.len()
+            );
+            status.warnings = data.warnings.clone();
+            ConnectorSnapshot {
+                status,
+                managed_club_id: Some(data.managed_club_id),
+                manager_name: Some(data.manager_name),
+                season: None,
+                clubs: data.clubs,
+                players: data.players,
+                tactic: None,
+                tactic_source: "none",
+                tactic_file_status: "not_imported",
+                tactic_file_name: None,
+                tactic_file_warnings: Vec::new(),
+                data_error: None,
+                data_source: "live-memory",
+                data_warnings: data.warnings,
+            }
+        }
+        Err(failure) => {
+            status.save_detected = Some(false);
+            status.parser_status = "error";
+            status.state = "parser_unverified";
+            status.pointer_validation = "failed";
+            status.failure_stage = Some(failure.stage.to_string());
+            status.windows_error_code = failure.windows_error_code.or(reader.last_error);
+            status.message = failure.message;
+            empty_snapshot(status.clone(), status.message)
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn collect_snapshot() -> ConnectorSnapshot {
+    let mut status = empty_status();
+    status.message = "The live FM26 connector requires the installed Windows app.".to_string();
+    empty_snapshot(status.clone(), status.message)
+}
+
+#[cfg(target_os = "windows")]
+fn extract_live_data(
+    reader: &mut ProcessReader,
+    module: ModuleInfo,
+    profile: &EntityMapProfile,
+    diagnostics: &mut ExtractionDiagnostics,
+) -> Result<LiveData, ExtractionFailure> {
+    let signature = profile
+        .signatures
+        .iter()
+        .find(|item| item.name == "human_manager_registry")
+        .ok_or_else(|| {
+            ExtractionFailure::new("manager_signature", "The exact build map is incomplete.")
+        })?;
+    let pattern = parse_pattern(&signature.pattern)?;
+    let hits = reader.scan_module(module, &pattern)?;
+    if hits.len() != 1 {
+        return Err(ExtractionFailure::new(
+            "manager_signature",
+            format!(
+                "The FM26 manager root did not validate uniquely ({} matches). No game data was shown.",
+                hits.len()
+            ),
+        ));
+    }
+    let signature_address = hits[0];
+    let displacement = reader.read_i32(signature_address + 3).ok_or_else(|| {
+        ExtractionFailure::new(
+            "manager_signature",
+            "The FM26 manager signature could not be read.",
+        )
+    })?;
+    let registry_slot = (signature_address + 7).wrapping_add_signed(displacement as i64);
+    let registry = reader
+        .read_pointer(registry_slot)
+        .filter(|value| *value != 0)
+        .ok_or_else(|| {
+            ExtractionFailure::new(
+                "manager_registry",
+                "No active FM26 manager registry was available.",
+            )
+        })?;
+    diagnostics.entity_root = Some(registry);
+    diagnostics.last_successful_read = Some("resolve_manager_registry".to_string());
+
+    let vector_start = reader
+        .read_pointer(registry + profile.constants.manager_registry_vector_offset)
+        .ok_or_else(|| {
+            ExtractionFailure::new(
+                "manager_registry",
+                "The active manager collection could not be read.",
+            )
+        })?;
+    let vector_end = reader
+        .read_pointer(registry + profile.constants.manager_registry_vector_offset + 8)
+        .ok_or_else(|| {
+            ExtractionFailure::new(
+                "manager_registry",
+                "The active manager collection end could not be read.",
+            )
+        })?;
+    if vector_end <= vector_start || vector_end - vector_start != 8 {
+        return Err(ExtractionFailure::new(
+            "manager_registry",
+            "GlassScout could not identify exactly one active human manager.",
+        ));
+    }
+    let human = reader
+        .read_pointer(vector_start)
+        .filter(|value| *value != 0)
+        .ok_or_else(|| {
+            ExtractionFailure::new(
+                "human_manager",
+                "The active human manager pointer was empty.",
+            )
+        })?;
+    diagnostics.save_pointer = Some(human);
+    diagnostics.last_successful_read = Some("resolve_human_manager".to_string());
+
+    let person = human + profile.constants.human_person_offset;
+    let first_name = read_name_field(reader, person + profile.constants.person_first_name_offset);
+    let second_name = read_name_field(reader, person + profile.constants.person_second_name_offset);
+    let common_name = read_name_field(reader, person + profile.constants.person_common_name_offset);
+    let manager_name = display_name(first_name, second_name, common_name).ok_or_else(|| {
+        ExtractionFailure::new(
+            "manager_identity",
+            "The active manager identity could not be validated.",
+        )
+    })?;
+
+    let contract = reader
+        .read_pointer(person + profile.constants.person_contract_offset)
+        .filter(|value| *value != 0)
+        .ok_or_else(|| {
+            ExtractionFailure::new(
+                "active_contract",
+                "The manager's active FM26 contract was not available.",
+            )
+        })?;
+    let team = reader
+        .read_pointer(contract + profile.constants.contract_team_offset)
+        .filter(|value| *value != 0)
+        .ok_or_else(|| {
+            ExtractionFailure::new(
+                "managed_team",
+                "The managed FM26 team could not be resolved.",
+            )
+        })?;
+    validate_vtable(
+        reader,
+        team,
+        module.base + profile.constants.team_vtable_rva,
+        "managed_team",
+    )?;
+    let club = reader
+        .read_pointer(team + profile.constants.team_club_offset)
+        .filter(|value| *value != 0)
+        .ok_or_else(|| {
+            ExtractionFailure::new(
+                "managed_club",
+                "The managed FM26 club could not be resolved.",
+            )
+        })?;
+    validate_vtable(
+        reader,
+        club,
+        module.base + profile.constants.club_vtable_rva,
+        "managed_club",
+    )?;
+    diagnostics.managed_club_pointer = Some(club);
+    diagnostics.last_successful_read = Some("validate_managed_club".to_string());
+
+    let team_uid = reader
+        .read_u32(team + profile.constants.entity_uid_offset)
+        .filter(|uid| *uid > 0)
+        .ok_or_else(|| {
+            ExtractionFailure::new("managed_club", "The managed team identifier was invalid.")
+        })?;
+    let club_uid = reader
+        .read_u32(club + profile.constants.entity_uid_offset)
+        .filter(|uid| *uid == team_uid)
+        .ok_or_else(|| {
+            ExtractionFailure::new("managed_club", "The team-to-club identifier check failed.")
+        })?;
+    let club_name_pointer = reader
+        .read_pointer(club + profile.constants.club_name_offset)
+        .filter(|value| *value != 0)
+        .ok_or_else(|| {
+            ExtractionFailure::new("managed_club", "The managed club name pointer was empty.")
+        })?;
+    let club_name = reader
+        .read_length_prefixed_string(club_name_pointer)
+        .ok_or_else(|| {
+            ExtractionFailure::new("managed_club", "The managed club name was not readable.")
+        })?;
+    let club_id = club_uid.to_string();
+
+    let players_start = reader
+        .read_pointer(team + profile.constants.team_players_start_offset)
+        .ok_or_else(|| {
+            ExtractionFailure::new(
+                "player_collection",
+                "The managed squad collection was not readable.",
+            )
+        })?;
+    let players_end = reader
+        .read_pointer(team + profile.constants.team_players_end_offset)
+        .ok_or_else(|| {
+            ExtractionFailure::new(
+                "player_collection",
+                "The managed squad collection end was not readable.",
+            )
+        })?;
+    if players_end <= players_start
+        || (players_end - players_start) % 8 != 0
+        || !(1..=200).contains(&((players_end - players_start) / 8))
+    {
+        return Err(ExtractionFailure::new(
+            "player_collection",
+            "The managed squad collection failed its size and alignment checks.",
+        ));
+    }
+    diagnostics.player_collection_pointer = Some(players_start);
+    let player_count = ((players_end - players_start) / 8) as usize;
+    let mut players = Vec::with_capacity(player_count);
+    for index in 0..player_count {
+        let raw_player = reader
+            .read_pointer(players_start + (index as u64 * 8))
+            .filter(|value| *value != 0)
+            .ok_or_else(|| {
+                ExtractionFailure::new(
+                    "player_collection",
+                    "A managed squad player pointer was empty.",
+                )
+            })?;
+        let person = raw_player + profile.constants.player_person_offset;
+        let uid = reader
+            .read_u32(person + profile.constants.entity_uid_offset)
+            .filter(|uid| *uid > 0)
+            .ok_or_else(|| {
+                ExtractionFailure::new(
+                    "player_identity",
+                    "A managed squad player identifier was invalid.",
+                )
+            })?;
+        let name = display_name(
+            read_name_field(reader, person + profile.constants.person_first_name_offset),
+            read_name_field(reader, person + profile.constants.person_second_name_offset),
+            read_name_field(reader, person + profile.constants.person_common_name_offset),
+        )
+        .ok_or_else(|| {
+            ExtractionFailure::new(
+                "player_identity",
+                "A managed squad player name was not readable.",
+            )
+        })?;
+        let position_bytes = reader
+            .read_bytes(
+                raw_player + profile.constants.player_positions_offset,
+                POSITION_NAMES.len(),
+            )
+            .ok_or_else(|| {
+                ExtractionFailure::new(
+                    "player_positions",
+                    "A managed squad position record was not readable.",
+                )
+            })?;
+        if position_bytes.iter().any(|rating| *rating > 20) {
+            return Err(ExtractionFailure::new(
+                "player_positions",
+                "A managed squad position record failed its rating bounds check.",
+            ));
+        }
+        let mut positions: Vec<String> = position_bytes
+            .iter()
+            .enumerate()
+            .filter(|(_, rating)| **rating >= 15)
+            .map(|(position, _)| POSITION_NAMES[position].to_string())
+            .collect();
+        if positions.is_empty() {
+            if let Some((position, _)) = position_bytes
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, rating)| **rating)
+            {
+                positions.push(POSITION_NAMES[position].to_string());
+            }
+        }
+        let calculated_position = positions.first().cloned();
+        players.push(json!({
+            "id": uid.to_string(),
+            "name": name,
+            "age": null,
+            "nationality": null,
+            "positions": positions,
+            "bestRole": null,
+            "currentAbility": null,
+            "potentialAbility": null,
+            "form": null,
+            "averageRating": null,
+            "minutesPlayed": null,
+            "goals": null,
+            "assists": null,
+            "contractStatus": null,
+            "value": null,
+            "wage": null,
+            "squadImportance": null,
+            "developmentTrend": null,
+            "tacticalFit": null,
+            "roleFit": null,
+            "strengths": [],
+            "weaknesses": [],
+            "clubId": club_id,
+            "transferInterest": null,
+            "loanInterest": null,
+            "transferAvailable": null,
+            "loanAvailable": null,
+            "attributes": {},
+            "per90": {},
+            "scoutKnowledge": "fully_known",
+            "bestCalculatedPosition": calculated_position,
+            "truePrice": null,
+            "fairPriceRange": null,
+            "valuationLabel": "unavailable",
+            "valuationReasoning": ["FM26 valuation fields are not mapped for this exact build."],
+            "retrainingSuggestion": null,
+            "roleReasoning": ["Only live positional familiarity is currently validated for this build."],
+            "riskLevel": "unknown",
+            "marketValueAmount": null
+        }));
+    }
+    diagnostics.last_successful_read = Some("extract_managed_squad".to_string());
+
+    let warnings = vec![
+        "Player names and positional familiarity are live; age, attributes, form, contract, value, wage and performance fields remain unavailable for this exact map.".to_string(),
+        "Live-memory tactic reading is disabled. Tactic Evaluation uses only a user-selected local FMF file.".to_string(),
+        "The FM26 shortlist collection is not mapped safely. GlassScout Favorites remains a local list resolved against live players.".to_string(),
+    ];
+    let clubs = vec![json!({
+        "id": club_id,
+        "name": club_name,
+        "nation": null,
+        "league": null
+    })];
+    Ok(LiveData {
+        managed_club_id: club_uid.to_string(),
+        manager_name,
+        clubs,
+        players,
+        warnings,
+    })
+}
+
+fn display_name(
+    first_name: Option<String>,
+    second_name: Option<String>,
+    common_name: Option<String>,
+) -> Option<String> {
+    if let Some(common) = common_name.filter(|value| !value.trim().is_empty()) {
+        return Some(common);
+    }
+    let full = [first_name, second_name]
+        .into_iter()
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!full.is_empty()).then_some(full)
+}
+
+#[cfg(target_os = "windows")]
+fn read_name_field(reader: &mut ProcessReader, field: u64) -> Option<String> {
+    let entry = reader.read_pointer(field)?;
+    if entry == 0 {
+        return None;
+    }
+    let text = reader.read_pointer(entry)?;
+    if text == 0 {
+        return None;
+    }
+    reader.read_length_prefixed_string(text)
+}
+
+#[cfg(target_os = "windows")]
+fn validate_vtable(
+    reader: &mut ProcessReader,
+    object: u64,
+    expected: u64,
+    stage: &'static str,
+) -> Result<(), ExtractionFailure> {
+    let actual = reader.read_pointer(object).ok_or_else(|| {
+        ExtractionFailure::new(stage, "A required FM26 object could not be read.")
+    })?;
+    if actual != expected {
+        return Err(ExtractionFailure::new(
+            stage,
+            format!(
+                "A required FM26 object failed type validation (expected {}, found {}). No data was shown.",
+                hex_address(expected),
+                hex_address(actual)
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn parse_pattern(pattern: &str) -> Result<Vec<Option<u8>>, ExtractionFailure> {
+    pattern
+        .split_whitespace()
+        .map(|token| {
+            if token == "??" || token == "?" {
+                Ok(None)
+            } else {
+                u8::from_str_radix(token, 16).map(Some).map_err(|_| {
+                    ExtractionFailure::new(
+                        "entity_map",
+                        "The embedded signature pattern is invalid.",
+                    )
+                })
+            }
+        })
+        .collect()
 }
 
 fn find_entity_map(identity: &ExecutableIdentity) -> Option<&'static EntityMapProfile> {
@@ -211,17 +763,16 @@ fn find_entity_map(identity: &ExecutableIdentity) -> Option<&'static EntityMapPr
         return None;
     }
     index.profiles.iter().find(|profile| {
-        let _declared_shape = (
-            profile.module.as_str(),
-            profile
+        let declared_shape_is_valid = !profile.module.is_empty()
+            && profile
                 .signatures
                 .iter()
-                .all(|signature| !signature.name.is_empty() && !signature.pattern.is_empty()),
-            profile.pointer_chains.iter().all(|chain| {
+                .all(|signature| !signature.name.is_empty() && !signature.pattern.is_empty())
+            && profile.pointer_chains.iter().all(|chain| {
                 !chain.name.is_empty() && !chain.root.is_empty() && !chain.offsets.is_empty()
-            }),
-        );
-        identity.file_version.as_deref() == Some(profile.file_version.as_str())
+            });
+        declared_shape_is_valid
+            && identity.file_version.as_deref() == Some(profile.file_version.as_str())
             && identity.product_version.as_deref() == Some(profile.product_version.as_str())
             && identity.sha256.as_deref() == Some(profile.executable_sha256.as_str())
             && identity.architecture.as_deref() == Some(profile.architecture.as_str())
@@ -251,12 +802,12 @@ fn read_executable_identity(path: &str) -> ExecutableIdentity {
                 identity.file_version = parts
                     .next()
                     .map(str::trim)
-                    .filter(|v| !v.is_empty())
+                    .filter(|value| !value.is_empty())
                     .map(str::to_string);
                 identity.product_version = parts
                     .next()
                     .map(str::trim)
-                    .filter(|v| !v.is_empty())
+                    .filter(|value| !value.is_empty())
                     .map(str::to_string);
             }
         }
@@ -297,13 +848,259 @@ fn read_pe_architecture(path: &str) -> Option<String> {
     }
 }
 
-#[derive(Default)]
-struct MemoryProbe {
-    handle_open: bool,
+fn hex_address(value: u64) -> String {
+    format!("0x{value:X}")
+}
+
+fn unix_milliseconds() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+struct ModuleInfo {
+    base: u64,
+    size: usize,
+}
+
+#[cfg(target_os = "windows")]
+struct ProcessReader {
+    handle: Handle,
     bytes_read: usize,
-    header_valid: bool,
-    process_path: Option<String>,
-    module_base: Option<String>,
+    last_error: Option<u32>,
+}
+
+#[cfg(target_os = "windows")]
+impl ProcessReader {
+    fn open(process_id: u32) -> Result<Self, u32> {
+        let handle = unsafe { OpenProcess(READ_ONLY_PROCESS_ACCESS, 0, process_id) };
+        if handle.is_null() {
+            return Err(unsafe { GetLastError() });
+        }
+        Ok(Self {
+            handle,
+            bytes_read: 0,
+            last_error: None,
+        })
+    }
+
+    fn process_path(&mut self) -> Option<String> {
+        let mut buffer = vec![0_u16; 32_768];
+        let mut size = buffer.len() as u32;
+        if unsafe { QueryFullProcessImageNameW(self.handle, 0, buffer.as_mut_ptr(), &mut size) }
+            == 0
+        {
+            self.last_error = Some(unsafe { GetLastError() });
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buffer[..size as usize]))
+    }
+
+    fn module(&mut self, wanted_name: &str) -> Option<ModuleInfo> {
+        let mut modules = vec![std::ptr::null_mut(); 2048];
+        let mut needed = 0_u32;
+        if unsafe {
+            EnumProcessModulesEx(
+                self.handle,
+                modules.as_mut_ptr(),
+                (modules.len() * std::mem::size_of::<Handle>()) as u32,
+                &mut needed,
+                0x03,
+            )
+        } == 0
+        {
+            self.last_error = Some(unsafe { GetLastError() });
+            return None;
+        }
+        let count = (needed as usize / std::mem::size_of::<Handle>()).min(modules.len());
+        for module in modules.into_iter().take(count) {
+            let mut name = [0_u16; 1024];
+            let name_length = unsafe {
+                GetModuleBaseNameW(self.handle, module, name.as_mut_ptr(), name.len() as u32)
+            };
+            if name_length == 0 {
+                continue;
+            }
+            if String::from_utf16_lossy(&name[..name_length as usize])
+                .eq_ignore_ascii_case(wanted_name)
+            {
+                let mut info = NativeModuleInfo::default();
+                if unsafe {
+                    GetModuleInformation(
+                        self.handle,
+                        module,
+                        &mut info,
+                        std::mem::size_of::<NativeModuleInfo>() as u32,
+                    )
+                } == 0
+                {
+                    self.last_error = Some(unsafe { GetLastError() });
+                    return None;
+                }
+                return Some(ModuleInfo {
+                    base: info.base_of_dll as u64,
+                    size: info.size_of_image as usize,
+                });
+            }
+        }
+        None
+    }
+
+    fn read_bytes(&mut self, address: u64, size: usize) -> Option<Vec<u8>> {
+        let mut buffer = vec![0_u8; size];
+        let mut bytes_read = 0_usize;
+        let result = unsafe {
+            ReadProcessMemory(
+                self.handle,
+                address as *const std::ffi::c_void,
+                buffer.as_mut_ptr().cast(),
+                size,
+                &mut bytes_read,
+            )
+        };
+        self.bytes_read = self.bytes_read.saturating_add(bytes_read);
+        if result == 0 || bytes_read != size {
+            self.last_error = Some(unsafe { GetLastError() });
+            return None;
+        }
+        Some(buffer)
+    }
+
+    fn read_pointer(&mut self, address: u64) -> Option<u64> {
+        self.read_bytes(address, 8)
+            .map(|bytes| u64::from_le_bytes(bytes.try_into().expect("eight bytes")))
+    }
+
+    fn read_u32(&mut self, address: u64) -> Option<u32> {
+        self.read_bytes(address, 4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().expect("four bytes")))
+    }
+
+    fn read_i32(&mut self, address: u64) -> Option<i32> {
+        self.read_bytes(address, 4)
+            .map(|bytes| i32::from_le_bytes(bytes.try_into().expect("four bytes")))
+    }
+
+    fn read_length_prefixed_string(&mut self, address: u64) -> Option<String> {
+        let length = self.read_u32(address)? as usize;
+        if length == 0 || length > MAX_STRING_BYTES {
+            return None;
+        }
+        let bytes = self.read_bytes(address + 4, length)?;
+        let value = String::from_utf8(bytes).ok()?;
+        if value.chars().any(char::is_control) {
+            return None;
+        }
+        Some(value)
+    }
+
+    fn scan_module(
+        &mut self,
+        module: ModuleInfo,
+        pattern: &[Option<u8>],
+    ) -> Result<Vec<u64>, ExtractionFailure> {
+        if pattern.is_empty() || module.size < pattern.len() {
+            return Err(ExtractionFailure::new(
+                "manager_signature",
+                "The manager signature is empty or larger than the game module.",
+            ));
+        }
+        const CHUNK_SIZE: usize = 4 * 1024 * 1024;
+        let overlap = pattern.len().saturating_sub(1);
+        let mut hits = Vec::new();
+        let mut offset = 0_usize;
+        while offset < module.size {
+            let read_start = offset.saturating_sub(if offset == 0 { 0 } else { overlap });
+            let read_size = CHUNK_SIZE
+                .saturating_add(if offset == 0 { 0 } else { overlap })
+                .min(module.size - read_start);
+            let bytes = self
+                .read_bytes(module.base + read_start as u64, read_size)
+                .ok_or_else(|| {
+                    ExtractionFailure::new(
+                        "manager_signature",
+                        "The FM26 game module could not be scanned with read-only access.",
+                    )
+                })?;
+            for position in 0..=bytes.len().saturating_sub(pattern.len()) {
+                let absolute_offset = read_start + position;
+                if offset != 0 && absolute_offset < offset {
+                    continue;
+                }
+                if pattern.iter().enumerate().all(|(index, expected)| {
+                    expected.is_none_or(|value| bytes[position + index] == value)
+                }) {
+                    hits.push(module.base + absolute_offset as u64);
+                }
+            }
+            offset = offset.saturating_add(CHUNK_SIZE);
+        }
+        Ok(hits)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for ProcessReader {
+    fn drop(&mut self) {
+        unsafe {
+            CloseHandle(self.handle);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+type Handle = *mut std::ffi::c_void;
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+#[derive(Default)]
+struct NativeModuleInfo {
+    base_of_dll: *mut std::ffi::c_void,
+    size_of_image: u32,
+    entry_point: *mut std::ffi::c_void,
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> Handle;
+    fn CloseHandle(handle: Handle) -> i32;
+    fn GetLastError() -> u32;
+    fn QueryFullProcessImageNameW(
+        process: Handle,
+        flags: u32,
+        file_name: *mut u16,
+        size: *mut u32,
+    ) -> i32;
+    fn ReadProcessMemory(
+        process: Handle,
+        base_address: *const std::ffi::c_void,
+        buffer: *mut std::ffi::c_void,
+        size: usize,
+        bytes_read: *mut usize,
+    ) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "psapi")]
+unsafe extern "system" {
+    fn EnumProcessModulesEx(
+        process: Handle,
+        modules: *mut Handle,
+        size: u32,
+        needed: *mut u32,
+        filter: u32,
+    ) -> i32;
+    fn GetModuleBaseNameW(process: Handle, module: Handle, base_name: *mut u16, size: u32) -> u32;
+    fn GetModuleInformation(
+        process: Handle,
+        module: Handle,
+        module_info: *mut NativeModuleInfo,
+        size: u32,
+    ) -> i32;
 }
 
 #[cfg(target_os = "windows")]
@@ -329,123 +1126,70 @@ fn find_fm26_process() -> Option<(u32, Option<String>)> {
     None
 }
 
-#[cfg(target_os = "windows")]
-fn probe_process_memory(process_id: u32) -> MemoryProbe {
-    use std::ffi::c_void;
-    type Handle = *mut c_void;
-    const PROCESS_VM_READ: u32 = 0x0010;
-    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
-    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
-
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> Handle;
-        fn CloseHandle(handle: Handle) -> i32;
-        fn QueryFullProcessImageNameW(
-            process: Handle,
-            flags: u32,
-            file_name: *mut u16,
-            size: *mut u32,
-        ) -> i32;
-        fn ReadProcessMemory(
-            process: Handle,
-            base_address: *const c_void,
-            buffer: *mut c_void,
-            size: usize,
-            bytes_read: *mut usize,
-        ) -> i32;
-    }
-    #[link(name = "psapi")]
-    unsafe extern "system" {
-        fn EnumProcessModules(
-            process: Handle,
-            modules: *mut Handle,
-            size: u32,
-            needed: *mut u32,
-        ) -> i32;
-    }
-
-    let handle = unsafe {
-        OpenProcess(
-            PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
-            0,
-            process_id,
-        )
-    };
-    if handle.is_null() {
-        return MemoryProbe::default();
-    }
-    let mut probe = MemoryProbe {
-        handle_open: true,
-        ..MemoryProbe::default()
-    };
-    let mut path_buffer = vec![0_u16; 32_768];
-    let mut path_size = path_buffer.len() as u32;
-    if unsafe { QueryFullProcessImageNameW(handle, 0, path_buffer.as_mut_ptr(), &mut path_size) }
-        != 0
-    {
-        probe.process_path = Some(String::from_utf16_lossy(&path_buffer[..path_size as usize]));
-    }
-    let mut module: Handle = std::ptr::null_mut();
-    let mut needed = 0_u32;
-    let module_found = unsafe {
-        EnumProcessModules(
-            handle,
-            &mut module,
-            std::mem::size_of::<Handle>() as u32,
-            &mut needed,
-        )
-    } != 0;
-    if module_found && !module.is_null() {
-        probe.module_base = Some(format!("0x{:X}", module as usize));
-        let mut header = [0_u8; 2];
-        let mut bytes_read = 0_usize;
-        let read_ok = unsafe {
-            ReadProcessMemory(
-                handle,
-                module.cast_const(),
-                header.as_mut_ptr().cast(),
-                header.len(),
-                &mut bytes_read,
-            )
-        } != 0;
-        probe.bytes_read = bytes_read;
-        probe.header_valid = read_ok && bytes_read == header.len() && header == *b"MZ";
-    }
-    unsafe {
-        CloseHandle(handle);
-    }
-    probe
-}
-
-#[cfg(not(target_os = "windows"))]
-fn probe_process_memory(_process_id: u32) -> MemoryProbe {
-    MemoryProbe::default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn connector_contract_never_advertises_write_access() {
-        assert!(!connector_status().can_write_memory);
+    fn connector_contract_never_requests_or_advertises_write_access() {
+        assert_eq!(READ_ONLY_PROCESS_ACCESS, 0x1410);
+        assert!(!empty_status().can_write_memory);
     }
 
     #[test]
-    fn unavailable_parser_never_returns_fake_entities() {
-        let snapshot = connector_snapshot();
-        assert!(snapshot.players.is_empty());
-        assert!(snapshot.clubs.is_empty());
-        assert!(snapshot.tactic.is_none());
-        assert!(snapshot.managed_club_id.is_none());
-    }
-
-    #[test]
-    fn entity_map_index_has_expected_schema_and_no_unverified_profiles() {
+    fn exact_build_profile_is_embedded_and_read_only() {
         let index: EntityMapIndex =
             serde_json::from_str(include_str!("../entity-maps/index.json")).unwrap();
         assert_eq!(index.schema_version, 1);
-        assert!(index.profiles.is_empty());
+        assert_eq!(index.profiles.len(), 1);
+        assert_eq!(index.profiles[0].module, "game_plugin.dll");
+        assert_eq!(
+            index.profiles[0].executable_sha256,
+            "3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73"
+        );
+    }
+
+    #[test]
+    fn snapshot_has_no_entities_when_fm26_is_not_available() {
+        #[cfg(not(target_os = "windows"))]
+        {
+            let snapshot = connector_snapshot();
+            assert!(snapshot.players.is_empty());
+            assert!(snapshot.clubs.is_empty());
+            assert!(snapshot.tactic.is_none());
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn running_exact_build_extracts_live_entities_without_hidden_ability_fields() {
+        if find_fm26_process().is_none() {
+            return;
+        }
+        let snapshot = connector_snapshot();
+        assert_eq!(
+            snapshot.status.state, "connected",
+            "{}",
+            snapshot.status.message
+        );
+        assert_eq!(snapshot.manager_name.as_deref(), Some("Tobias Thorsen"));
+        assert_eq!(
+            snapshot
+                .clubs
+                .first()
+                .and_then(|club| club["name"].as_str()),
+            Some("Madla IL")
+        );
+        assert_eq!(snapshot.players.len(), 38);
+        assert!(snapshot.tactic.is_none());
+        assert_eq!(snapshot.tactic_source, "none");
+        assert_eq!(snapshot.status.live_memory_tactic_read, "disabled");
+        for player in &snapshot.players {
+            assert!(player["currentAbility"].is_null());
+            assert!(player["potentialAbility"].is_null());
+            assert!(player["attributes"]
+                .as_object()
+                .is_some_and(|value| value.is_empty()));
+        }
     }
 }

@@ -14,7 +14,13 @@ import { PlayerProfileScreen } from "@/components/player-profile-screen";
 import { StartupScreen } from "@/components/startup-screen";
 import { SettingsScreen } from "@/components/settings-screen";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { fm26LiveAdapter, type LiveConnectorStatus, type LiveFootballSnapshot } from "@/domain/adapters";
+import {
+  chooseAndImportFmfTactic,
+  fm26LiveAdapter,
+  mergeTacticFile,
+  type LiveConnectorStatus,
+  type LiveFootballSnapshot,
+} from "@/domain/adapters";
 import { toggleFavorite, updateFavoriteNote, type FavoriteRecord } from "@/domain/live-data";
 
 const initialStatus: LiveConnectorStatus = {
@@ -38,6 +44,15 @@ const initialStatus: LiveConnectorStatus = {
   entityMapStatus: "not_checked",
   entityMapProfileId: null,
   pointerValidation: "not_run",
+  handleAccessFlags: "Not checked",
+  entityRoot: null,
+  savePointer: null,
+  managedClubPointer: null,
+  playerCollectionPointer: null,
+  liveMemoryTacticRead: "disabled",
+  failureStage: null,
+  lastSuccessfulRead: null,
+  windowsErrorCode: null,
   canWriteMemory: false,
   message: "Diagnostics have not run yet.",
   warnings: [],
@@ -51,6 +66,10 @@ const initialSnapshot: LiveFootballSnapshot = {
   clubs: [],
   players: [],
   tactic: null,
+  tacticSource: "none",
+  tacticFileStatus: "not_imported",
+  tacticFileName: null,
+  tacticFileWarnings: [],
   dataError: "Diagnostics have not run yet.",
   dataSource: "none",
   dataWarnings: [],
@@ -75,6 +94,7 @@ export function GlassScoutApp() {
     }
   });
   const [checking, setChecking] = useState(false);
+  const [importingTactic, setImportingTactic] = useState(false);
 
   useEffect(() => {
     window.localStorage.setItem("glassscout-favorites-v1", JSON.stringify(favorites));
@@ -99,6 +119,17 @@ export function GlassScoutApp() {
 
   const togglePlayerFavorite = (playerId: string) => setFavorites((current) => toggleFavorite(current, playerId));
   const updatePlayerNote = (playerId: string, note: string) => setFavorites((current) => updateFavoriteNote(current, playerId, note));
+  const importTactic = useCallback(async () => {
+    setImportingTactic(true);
+    try {
+      const result = await chooseAndImportFmfTactic();
+      if (result) {
+        setSnapshot((current) => mergeTacticFile(current, result));
+      }
+    } finally {
+      setImportingTactic(false);
+    }
+  }, []);
   const openPlayer = (playerId: string) => {
     setSelectedPlayerId(playerId);
     setScreen("Player Profile");
@@ -115,7 +146,7 @@ export function GlassScoutApp() {
   const content =
     screen === "Dashboard" ? <DashboardScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onNavigate={setScreen} /> :
     screen === "My Team" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onOpenPlayer={openPlayer} /> :
-    screen === "Tactic Evaluation" ? <TacticsScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} /> :
+    screen === "Tactic Evaluation" ? <TacticsScreen snapshot={snapshot} importing={importingTactic} onImportTactic={importTactic} /> :
     screen === "Role DNA" ? <RoleDnaScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} /> :
     screen === "Recruitment" ? <RecruitmentScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
     screen === "Favorites / Shortlist" ? <FavoritedPlayersScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onUpdateNote={updatePlayerNote} /> :

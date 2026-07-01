@@ -50,9 +50,10 @@ export function FavoritedPlayersScreen({
   return (
     <main className="screen favorites-screen">
       <div className="planner-heading">
-        <div><h1>Favorites / Shortlist</h1><p>Your working target list, resolved against the latest verified dataset.</p></div>
-        <div className="live-source-label"><Star />{resolved.length} live favorites</div>
+        <div><h1>Favorites</h1><p>A local GlassScout list resolved against the latest live FM26 players.</p></div>
+        <div className="live-source-label"><Star />{resolved.length} local favorites</div>
       </div>
+      <section className="favorites-source-note">FM26’s own shortlist collection is not mapped safely for this exact build. These favorites stay local and never create or preserve player data.</section>
       <section className="favorites-toolbar">
         <div className="recruitment-search"><Search /><Input aria-label="Filter favorite players" placeholder="Filter favorites…" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
         <label>Sort by<select value={sort} onChange={(event) => setSort(event.target.value as FavoriteSort)}><option value="name">Name</option><option value="age">Age</option><option value="roleFit">Role fit</option><option value="tacticalFit">Tactical fit</option></select></label>

@@ -38,6 +38,18 @@ export function SettingsScreen({
           <div><dt>Entity map</dt><dd>{status.entityMapStatus === "matched" ? status.entityMapProfileId : status.entityMapStatus ?? "Not checked"}</dd></div>
           <div><dt>Pointer validation</dt><dd>{status.pointerValidation?.replaceAll("_", " ") ?? "Not run"}</dd></div>
           <div><dt>Active save</dt><dd>{status.saveDetected === true ? "Detected" : "Not readable"}</dd></div>
+          <div><dt>Read-only access flags</dt><dd>{status.handleAccessFlags ?? "Unavailable"}</dd></div>
+          <div><dt>Manager registry</dt><dd>{status.entityRoot ?? "Unavailable"}</dd></div>
+          <div><dt>Active manager</dt><dd>{status.savePointer ?? "Unavailable"}</dd></div>
+          <div><dt>Managed club</dt><dd>{status.managedClubPointer ?? "Unavailable"}</dd></div>
+          <div><dt>Squad collection</dt><dd>{status.playerCollectionPointer ?? "Unavailable"}</dd></div>
+          <div><dt>Live memory tactic read</dt><dd>{status.liveMemoryTacticRead ?? "disabled"}</dd></div>
+          <div><dt>Tactic source</dt><dd>{snapshot.tacticSource.replaceAll("_", " ")}</dd></div>
+          <div><dt>FMF parser status</dt><dd>{snapshot.tacticFileStatus.replaceAll("_", " ")}</dd></div>
+          <div><dt>Imported FMF</dt><dd>{snapshot.tacticFileName ?? "None"}</dd></div>
+          <div><dt>Last successful read</dt><dd>{status.lastSuccessfulRead?.replaceAll("_", " ") ?? "None"}</dd></div>
+          <div><dt>Failure stage</dt><dd>{status.failureStage?.replaceAll("_", " ") ?? "None"}</dd></div>
+          <div><dt>Windows error</dt><dd>{status.windowsErrorCode ?? "None"}</dd></div>
           <div className="diagnostic-hash"><dt>Executable SHA-256</dt><dd>{status.executableSha256 ?? "Unavailable"}</dd></div>
         </dl>
         <div className="advanced-diagnostic-message"><strong>Connector result</strong><span>{status.message}</span></div>

@@ -1,4 +1,49 @@
 {
   "schemaVersion": 1,
-  "profiles": []
+  "profiles": [
+    {
+      "id": "fm26-6000.0.52.8888375-win64-3653c97f",
+      "fileVersion": "6000.0.52.8888375",
+      "productVersion": "6000.0.52f1-fm26-05f1 (87a0370e9917)",
+      "executableSha256": "3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73",
+      "architecture": "x64",
+      "module": "game_plugin.dll",
+      "signatures": [
+        {
+          "name": "human_manager_registry",
+          "pattern": "48 8B 0D ?? ?? ?? ?? 48 8B 41 18 48 8B 49 20 48 29 C1 48 C1 F9 03 48 39 CE"
+        }
+      ],
+      "pointerChains": [
+        {
+          "name": "managed_team",
+          "root": "human_manager",
+          "offsets": [1104, 168, 16]
+        },
+        {
+          "name": "managed_club",
+          "root": "managed_team",
+          "offsets": [48]
+        }
+      ],
+      "constants": {
+        "managerRegistryVectorOffset": 24,
+        "humanPersonOffset": 1104,
+        "personFirstNameOffset": 80,
+        "personSecondNameOffset": 88,
+        "personCommonNameOffset": 96,
+        "personContractOffset": 168,
+        "contractTeamOffset": 16,
+        "teamVtableRva": 72094632,
+        "teamClubOffset": 48,
+        "teamPlayersStartOffset": 56,
+        "teamPlayersEndOffset": 64,
+        "clubVtableRva": 72066328,
+        "clubNameOffset": 192,
+        "entityUidOffset": 12,
+        "playerPersonOffset": 648,
+        "playerPositionsOffset": 336
+      }
+    }
+  ]
 }
