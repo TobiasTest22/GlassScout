@@ -15,6 +15,14 @@ export type LiveConnectorStatus = {
   parserStatus: "unverified" | "ready" | "error";
   state: ConnectionState;
   playersLoaded: number;
+  managedSquadPlayers: number;
+  databasePlayersIndexed: number;
+  backgroundPlayersIndexed: number;
+  visiblePlayersLoaded: number;
+  fullyScoutedPlayers: number;
+  partialScoutReports: number;
+  databaseIndexStatus: "not_run" | "ready" | "partial" | "failed";
+  databaseScope: "none" | "managed-squad" | "full-save-index";
   clubsLoaded: number;
   lastSync: string | null;
   bytesRead: number;
@@ -173,6 +181,14 @@ const desktopRequiredStatus: LiveConnectorStatus = {
   parserStatus: "unverified",
   state: "parser_unverified",
   playersLoaded: 0,
+  managedSquadPlayers: 0,
+  databasePlayersIndexed: 0,
+  backgroundPlayersIndexed: 0,
+  visiblePlayersLoaded: 0,
+  fullyScoutedPlayers: 0,
+  partialScoutReports: 0,
+  databaseIndexStatus: "not_run",
+  databaseScope: "none",
   clubsLoaded: 0,
   lastSync: null,
   bytesRead: 0,
@@ -284,7 +300,7 @@ export const fm26LiveAdapter: FootballDataAdapter = {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const [snapshot, tacticFile] = await Promise.all([
-        invoke<LiveFootballSnapshot>("connector_snapshot"),
+        invoke<LiveFootballSnapshot>("load_active_save"),
         invoke<TacticFileResult>("tactic_file_status").catch(() => notImportedTactic),
       ]);
       return mergeTacticFile(snapshot, tacticFile);

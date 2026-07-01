@@ -14,7 +14,7 @@ function PlayerRow({ player, onOpenPlayer }: { player: LivePlayer; onOpenPlayer:
       <span>{player.positions.join(" / ") || "Unknown"}<small>Live positional familiarity</small></span>
       <span>{player.bestCalculatedPosition ?? "Unavailable"}<small>Strongest readable position</small></span>
       <span className={`knowledge-${player.scoutKnowledge ?? "unknown"}`}>{(player.scoutKnowledge ?? "unknown").replaceAll("_", " ")}<small>Managed squad</small></span>
-      <Button variant="outline" size="sm" onClick={() => onOpenPlayer(player.id)}>Profile<ExternalLink /></Button>
+      <Button variant="outline" size="sm" onClick={() => onOpenPlayer(player.id)}>Profile<ExternalLink data-icon="inline-end" /></Button>
     </article>
   );
 }
@@ -38,13 +38,13 @@ export function MyTeamScreen({
   const managedClub = snapshot.clubs.find((club) => club.id === snapshot.managedClubId);
 
   if (snapshot.status.state !== "connected" || !snapshot.managedClubId || squad.length === 0) {
-    return <main className="screen"><LiveDataState snapshot={snapshot} title="My Team" checking={checking} onRefresh={onRefresh} /></main>;
+    return <main className="screen"><LiveDataState snapshot={snapshot} title="Squad Planner" checking={checking} onRefresh={onRefresh} /></main>;
   }
 
   return (
     <main className="screen my-team-screen">
       <div className="planner-heading">
-        <div><h1>My Team</h1><p>{managedClub?.name} · {snapshot.season ?? "Active FM26 save"} · {squad.length} current players</p></div>
+        <div><h1>Squad Planner</h1><p>{managedClub?.name} · {snapshot.season ?? "Active FM26 save"} · {squad.length} current players</p></div>
         <div className="live-source-label"><span className="live-dot" />Live FM26</div>
       </div>
 

@@ -1,12 +1,52 @@
 "use client";
 
-import { ArrowRight, Database, RefreshCw, Target, TrendingUp, UserRoundSearch, UsersRound } from "lucide-react";
+import {
+  ArrowRight,
+  Binoculars,
+  ClipboardCheck,
+  Database,
+  FileWarning,
+  IdCard,
+  SearchCheck,
+  ShieldCheck,
+  UsersRound,
+} from "lucide-react";
 import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
 import type { Screen } from "@/components/app-sidebar";
+import { LiveDataState } from "@/components/live-data-state";
+import { TacticalBoard } from "@/components/tactical-board";
+import { Button } from "@/components/ui/button";
 import type { LiveFootballSnapshot } from "@/domain/adapters";
 import { groupSquad, positionGroups } from "@/domain/live-data";
-import { LiveDataState } from "@/components/live-data-state";
+
+function percent(numerator: number, denominator: number) {
+  if (!denominator) return 0;
+  return Math.min(100, Math.round((numerator / denominator) * 100));
+}
+
+function HealthRow({
+  icon: Icon,
+  label,
+  value,
+  status,
+  tone,
+}: {
+  icon: typeof UsersRound;
+  label: string;
+  value: number;
+  status: string;
+  tone: "good" | "attention" | "unknown";
+}) {
+  return (
+    <button className="health-row">
+      <span className="health-icon"><Icon /></span>
+      <strong>{label}</strong>
+      <span className="health-track"><i style={{ width: `${value}%` }} data-tone={tone} /></span>
+      <small data-tone={tone}>{status}</small>
+      <ArrowRight />
+    </button>
+  );
+}
 
 export function DashboardScreen({
   snapshot,
@@ -20,38 +60,97 @@ export function DashboardScreen({
   onNavigate: (screen: Screen) => void;
 }) {
   if (snapshot.status.state !== "connected" || !snapshot.managedClubId) {
-    return <motion.main className="screen dashboard-screen" initial={false} animate={{ opacity: 1 }}><LiveDataState snapshot={snapshot} title="Dashboard" checking={checking} onRefresh={onRefresh} /></motion.main>;
+    return (
+      <motion.main className="screen dashboard-screen" initial={false} animate={{ opacity: 1 }}>
+        <LiveDataState snapshot={snapshot} title="Dashboard" checking={checking} onRefresh={onRefresh} />
+      </motion.main>
+    );
   }
 
   const club = snapshot.clubs.find((item) => item.id === snapshot.managedClubId);
   const squad = snapshot.players.filter((player) => player.clubId === snapshot.managedClubId);
   const groups = groupSquad(squad);
-  const weakest = squad.filter((player) => player.roleFit != null).toSorted((a, b) => (a.roleFit ?? 0) - (b.roleFit ?? 0)).slice(0, 4);
-  const retraining = squad.filter((player) => player.retrainingSuggestion).toSorted((a, b) => (b.roleFit ?? 0) - (a.roleFit ?? 0)).slice(0, 4);
-  const undervalued = squad.filter((player) => player.valuationLabel === "undervalued").toSorted((a, b) => (b.truePrice ?? 0) - (a.truePrice ?? 0)).slice(0, 4);
-  const recruitmentNeeds = positionGroups.filter((group) => (groups.get(group)?.length ?? 0) < 2);
+  const healthyGroups = positionGroups.filter((group) => (groups.get(group)?.length ?? 0) >= 2).length;
+  const roleDepth = percent(healthyGroups, positionGroups.length);
+  const scoutingCoverage = percent(
+    snapshot.status.visiblePlayersLoaded,
+    snapshot.status.databasePlayersIndexed,
+  );
+  const externalVisible = snapshot.players.filter((player) => player.clubId !== snapshot.managedClubId);
+
+  const briefing = [
+    {
+      icon: Database,
+      title: `${snapshot.status.databasePlayersIndexed} player records indexed`,
+      detail: `${snapshot.status.backgroundPlayersIndexed} wider-save records remain behind the knowledge gate.`,
+      action: "Review scope",
+      screen: "Settings" as Screen,
+    },
+    {
+      icon: snapshot.tactic ? ClipboardCheck : FileWarning,
+      title: snapshot.tactic ? `${snapshot.tactic.formation} tactic ready` : "Tactical decoding needs attention",
+      detail: snapshot.tacticFileName
+        ? `${snapshot.tacticFileName} is stored safely, but this FMF format is not decoded.`
+        : "Import the active FMF tactic to enable role and tactical-fit analysis.",
+      action: snapshot.tactic ? "Open board" : "Import tactic",
+      screen: "Tactical Board" as Screen,
+    },
+    {
+      icon: ShieldCheck,
+      title: `${squad.length} managed-club players visibility-safe`,
+      detail: "Names and positions are live; unsupported fields remain Unknown.",
+      action: "Open squad",
+      screen: "Squad Planner" as Screen,
+    },
+  ];
 
   return (
-    <motion.main className="screen dashboard-screen" initial={false} animate={{ opacity: 1 }}>
-      <div className="page-intro">
-        <div><h1>{club?.name ?? "Managed team"}</h1><p>{snapshot.season ?? "Active FM26 save"} · Live game data</p></div>
-        <div className="heading-actions"><Button variant="outline" onClick={onRefresh} disabled={checking}><RefreshCw data-icon="inline-start" />Refresh</Button><Button onClick={() => onNavigate("Recruitment")}>Open recruitment<ArrowRight data-icon="inline-end" /></Button></div>
+    <motion.main className="screen dashboard-screen dashboard-command" initial={false} animate={{ opacity: 1 }}>
+      <div className="dashboard-command-grid">
+        <TacticalBoard snapshot={snapshot} compact />
+
+        <section className="command-panel recruitment-pulse">
+          <header><h2>Recruitment pulse</h2><span>{externalVisible.length} live targets</span></header>
+          <div className="recruitment-pulse-empty">
+            <span className="target-avatar"><SearchCheck /></span>
+            <div>
+              <strong>No visibility-safe external targets yet</strong>
+              <p>
+                {snapshot.status.backgroundPlayersIndexed
+                  ? `${snapshot.status.backgroundPlayersIndexed} wider-save records are indexed but hidden until club knowledge is mapped.`
+                  : "Load the active save to build the wider player index."}
+              </p>
+            </div>
+          </div>
+          <Button variant="outline" onClick={() => onNavigate("Recruitment")}>
+            <SearchCheck data-icon="inline-start" />Plan recruitment
+          </Button>
+        </section>
+
+        <section className="command-panel department-briefing">
+          <header><h2>Department briefing</h2><span>{club?.name ?? "Active club"}</span></header>
+          <div>
+            {briefing.map(({ icon: Icon, title, detail, action, screen }) => (
+              <button key={title} className="briefing-row" onClick={() => onNavigate(screen)}>
+                <span className="briefing-icon"><Icon /></span>
+                <span><strong>{title}</strong><small>{detail}</small></span>
+                <b>{action}</b>
+                <ArrowRight />
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="command-panel squad-health">
+          <header><h2>Squad health</h2><span>Live evidence</span></header>
+          <div>
+            <HealthRow icon={UsersRound} label="Role depth" value={roleDepth} status={roleDepth >= 70 ? "Good" : "Attention"} tone={roleDepth >= 70 ? "good" : "attention"} />
+            <HealthRow icon={ClipboardCheck} label="Contracts" value={0} status="Unknown" tone="unknown" />
+            <HealthRow icon={IdCard} label="Registration" value={0} status="Unknown" tone="unknown" />
+            <HealthRow icon={Binoculars} label="Scouting coverage" value={scoutingCoverage} status={scoutingCoverage >= 60 ? "Good" : "Restricted"} tone={scoutingCoverage >= 60 ? "good" : "attention"} />
+          </div>
+        </section>
       </div>
-
-      <section className="live-overview-grid dashboard-overview-rich">
-        <button onClick={() => onNavigate("My Team")}><UsersRound /><span><small>Current squad</small><strong>{squad.length} players</strong></span></button>
-        <button onClick={() => onNavigate("Tactic Evaluation")}><Target /><span><small>Current tactic</small><strong>{snapshot.tactic?.formation ?? "Unavailable"}</strong></span></button>
-        <button onClick={() => onNavigate("Settings")}><Database /><span><small>Last live sync</small><strong>{snapshot.status.lastSync ? new Date(Number(snapshot.status.lastSync)).toLocaleTimeString() : "Not synced"}</strong></span></button>
-        <button onClick={() => onNavigate("Role DNA")}><TrendingUp /><span><small>Retraining candidates</small><strong>{retraining.length}</strong></span></button>
-      </section>
-
-      <section className="dashboard-intelligence">
-        <article><header><Target /><h2>Weakest roles</h2></header>{weakest.length ? weakest.map((player) => <span key={player.id}><strong>{player.name}</strong><small>{player.bestRole ?? "Role unavailable"} · {player.roleFit}%</small></span>) : <p>Role evidence is unavailable.</p>}</article>
-        <article><header><TrendingUp /><h2>Top retraining candidates</h2></header>{retraining.length ? retraining.map((player) => <span key={player.id}><strong>{player.name}</strong><small>{player.bestCalculatedPosition} · {player.roleFit}% DNA</small></span>) : <p>No evidence-backed retraining signal.</p>}</article>
-        <article><header><UserRoundSearch /><h2>Recruitment priorities</h2></header>{recruitmentNeeds.length ? recruitmentNeeds.slice(0, 4).map((group) => <span key={group}><strong>{group}</strong><small>{groups.get(group)?.length ?? 0} readable options</small></span>) : <p>At least two readable options exist in every position group.</p>}</article>
-        <article><header><Database /><h2>Undervalued players</h2></header>{undervalued.length ? undervalued.map((player) => <span key={player.id}><strong>{player.name}</strong><small>{player.value} FM value · €{player.truePrice}m estimate</small></span>) : <p>No transparent undervaluation signal in available data.</p>}</article>
-      </section>
-
     </motion.main>
   );
 }
