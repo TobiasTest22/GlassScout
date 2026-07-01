@@ -20,13 +20,13 @@ export function SettingsScreen({
         <div><h1>Settings</h1><p>Live FM26 connector and local application controls.</p></div>
       </div>
       <section className="settings-list">
-        <article><Database /><div><strong>Active FM26 game</strong><span>{status.processDetected ? "Football Manager 26 detected" : "Waiting for FM26"}</span></div><Button variant="outline" onClick={onRefresh} disabled={checking}><RefreshCw data-icon="inline-start" className={checking ? "spin" : undefined} />Check now</Button></article>
+        <article><Database /><div><strong>Active FM26 game</strong><span>{status.processDetected ? "Football Manager 26 detected" : "Waiting for FM26"}</span></div><Button variant="outline" onClick={onRefresh} disabled={checking}><RefreshCw data-icon="inline-start" className={checking ? "spin" : undefined} />Load Active Save</Button></article>
         <article><LockKeyhole /><div><strong>Memory safety</strong><span>Query and read access only. GlassScout cannot write to FM26.</span></div><b>{status.memoryAccess.replaceAll("_", " ")}</b></article>
       </section>
 
       <details className="advanced-diagnostics">
         <summary><span><Cpu />Advanced diagnostics</span><ChevronDown /></summary>
-        <p>Technical connection details for troubleshooting unsupported FM26 builds.</p>
+        <p>Technical connection and visibility-gate details for troubleshooting supported FM26 builds.</p>
         <dl>
           <div><dt>Process</dt><dd>{status.processDetected ? `Detected · PID ${status.processId}` : "Not detected"}</dd></div>
           <div><dt>Executable</dt><dd>{status.processPath ?? "Unavailable"}</dd></div>
@@ -43,6 +43,14 @@ export function SettingsScreen({
           <div><dt>Active manager</dt><dd>{status.savePointer ?? "Unavailable"}</dd></div>
           <div><dt>Managed club</dt><dd>{status.managedClubPointer ?? "Unavailable"}</dd></div>
           <div><dt>Squad collection</dt><dd>{status.playerCollectionPointer ?? "Unavailable"}</dd></div>
+          <div><dt>Database index</dt><dd>{status.databaseIndexStatus.replaceAll("_", " ")}</dd></div>
+          <div><dt>Database scope</dt><dd>{status.databaseScope.replaceAll("-", " ")}</dd></div>
+          <div><dt>Managed squad players</dt><dd>{status.managedSquadPlayers}</dd></div>
+          <div><dt>Player records indexed</dt><dd>{status.databasePlayersIndexed}</dd></div>
+          <div><dt>Background records gated</dt><dd>{status.backgroundPlayersIndexed}</dd></div>
+          <div><dt>Visibility-safe players</dt><dd>{status.visiblePlayersLoaded}</dd></div>
+          <div><dt>Fully scouted players</dt><dd>{status.fullyScoutedPlayers}</dd></div>
+          <div><dt>Partial scout reports</dt><dd>{status.partialScoutReports}</dd></div>
           <div><dt>Live memory tactic read</dt><dd>{status.liveMemoryTacticRead ?? "disabled"}</dd></div>
           <div><dt>Tactic source</dt><dd>{snapshot.tacticSource.replaceAll("_", " ")}</dd></div>
           <div><dt>FMF parser status</dt><dd>{snapshot.tacticFileStatus.replaceAll("_", " ")}</dd></div>

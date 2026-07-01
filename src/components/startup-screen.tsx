@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect } from "react";
-import { Check, Download, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Database, Download, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import type { LiveConnectorStatus } from "@/domain/adapters";
 import { windowsInstallerUrl } from "@/domain/distribution";
 import { cn } from "@/lib/utils";
+
+const loadStageLabels: Record<string, string> = {
+  detecting_fm26: "Detecting FM26…",
+  validating_active_save: "Validating active save…",
+  reading_managed_club: "Reading managed club…",
+  loading_managed_squad: "Loading managed squad…",
+  indexing_player_database: "Indexing wider player database…",
+  building_visibility_index: "Building visibility-safe index…",
+  ready: "Ready",
+};
 
 export function StartupScreen({
   onConnect,
@@ -15,17 +25,34 @@ export function StartupScreen({
   onEnter: (status: LiveConnectorStatus) => void;
 }) {
   const desktopRuntime = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<LiveConnectorStatus | null>(null);
+  const [loadStage, setLoadStage] = useState("detecting_fm26");
 
   useEffect(() => {
     if (!desktopRuntime) return;
-    let active = true;
-    void onConnect().then((status) => {
-      if (active) onEnter(status);
-    });
-    return () => {
-      active = false;
-    };
-  }, [desktopRuntime, onConnect, onEnter]);
+    let remove: (() => void) | null = null;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) => listen<string>("glassscout-load-progress", (event) => {
+        setLoadStage(event.payload);
+      }))
+      .then((unlisten) => {
+        remove = unlisten;
+      });
+    return () => remove?.();
+  }, [desktopRuntime]);
+
+  const loadActiveSave = async () => {
+    setLoading(true);
+    setLoadStage("detecting_fm26");
+    try {
+      const next = await onConnect();
+      setStatus(next);
+      if (next.state === "connected") onEnter(next);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <main className="startup-screen live-startup">
@@ -35,18 +62,18 @@ export function StartupScreen({
       </div>
 
       <section className="live-start-card">
-        <span className="live-start-icon"><ShieldCheck /></span>
+        <span className="live-start-icon">{desktopRuntime ? <Database /> : <ShieldCheck />}</span>
         <p className="section-kicker">Live FM26 connection</p>
-        <h1>{desktopRuntime ? "Connecting to Football Manager 26" : "Install GlassScout for Windows"}</h1>
+        <h1>{desktopRuntime ? "Load your active FM26 save" : "Install GlassScout for Windows"}</h1>
         <p>
           {desktopRuntime
-            ? "Open FM26 and load your save. GlassScout will detect the active game and validate live access automatically."
+            ? "Open FM26 and load your save, then start a read-only scan. GlassScout loads your club and squad first, then indexes the wider player database behind strict visibility gates."
             : "GlassScout reads the active FM26 game through its installed Windows desktop connector."}
         </p>
         {desktopRuntime ? (
-          <Button disabled>
-            <RefreshCw data-icon="inline-start" className="spin" />
-            Checking live connection…
+          <Button onClick={loadActiveSave} disabled={loading}>
+            {loading ? <RefreshCw data-icon="inline-start" className="spin" /> : <Database data-icon="inline-start" />}
+            {loading ? loadStageLabels[loadStage] ?? "Reading active save…" : "Load Active Save"}
           </Button>
         ) : (
           <a className={cn(buttonVariants({ size: "lg" }), "setup-download")} href={windowsInstallerUrl}>
@@ -58,6 +85,9 @@ export function StartupScreen({
           <span><LockKeyhole />Read-only access</span>
           <span><ShieldCheck />No simulated players</span>
         </div>
+        {status && status.state !== "connected" ? (
+          <p className="load-failure" role="alert">{status.message}</p>
+        ) : null}
       </section>
     </main>
   );

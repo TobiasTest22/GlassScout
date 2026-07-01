@@ -1,7 +1,14 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs::File, io::Read, path::Path, sync::OnceLock};
+use tauri::Emitter;
+use std::{
+    collections::{HashMap, HashSet},
+    fs::File,
+    io::Read,
+    path::Path,
+    sync::{OnceLock, RwLock},
+};
 
 const READ_ONLY_PROCESS_ACCESS: u32 = 0x1410;
 const MAX_STRING_BYTES: usize = 192;
@@ -20,6 +27,14 @@ pub struct ConnectorStatus {
     parser_status: &'static str,
     state: &'static str,
     players_loaded: u32,
+    managed_squad_players: u32,
+    database_players_indexed: u32,
+    background_players_indexed: u32,
+    visible_players_loaded: u32,
+    fully_scouted_players: u32,
+    partial_scout_reports: u32,
+    database_index_status: &'static str,
+    database_scope: &'static str,
     clubs_loaded: u32,
     last_sync: Option<String>,
     bytes_read: usize,
@@ -142,8 +157,30 @@ struct LiveData {
     manager_name: String,
     clubs: Vec<Value>,
     players: Vec<Value>,
+    database_players_indexed: u32,
+    background_players_indexed: u32,
+    database_index_status: &'static str,
+    database_scope: &'static str,
     warnings: Vec<String>,
 }
+
+#[derive(Clone)]
+struct IndexedPlayerRecord {
+    id: String,
+    name: String,
+    positions: Vec<String>,
+    managed_squad: bool,
+    visibility_safe: bool,
+}
+
+#[derive(Default)]
+struct PlayerDatabaseIndex {
+    process_id: u32,
+    save_pointer: u64,
+    records: HashMap<String, IndexedPlayerRecord>,
+}
+
+static PLAYER_DATABASE_INDEX: OnceLock<RwLock<PlayerDatabaseIndex>> = OnceLock::new();
 
 struct ExtractionFailure {
     stage: &'static str,
@@ -163,12 +200,57 @@ impl ExtractionFailure {
 
 #[tauri::command]
 pub fn connector_status() -> ConnectorStatus {
-    connector_snapshot().status
+    collect_snapshot(false, None).status
 }
 
 #[tauri::command]
 pub fn connector_snapshot() -> ConnectorSnapshot {
-    collect_snapshot()
+    collect_snapshot(false, None)
+}
+
+#[tauri::command]
+pub fn load_active_save(app: tauri::AppHandle) -> ConnectorSnapshot {
+    let progress = |stage: &'static str| {
+        let _ = app.emit("glassscout-load-progress", stage);
+    };
+    collect_snapshot(true, Some(&progress))
+}
+
+#[tauri::command]
+pub fn search_indexed_players(query: String) -> Vec<Value> {
+    let normalized = query.trim().to_lowercase();
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+    let Some(index) = PLAYER_DATABASE_INDEX.get() else {
+        return Vec::new();
+    };
+    let Ok(index) = index.read() else {
+        return Vec::new();
+    };
+    let _identity = (index.process_id, index.save_pointer);
+    index
+        .records
+        .values()
+        .filter(|record| record.visibility_safe)
+        .filter(|record| {
+            record.name.to_lowercase().contains(&normalized)
+                || record
+                    .positions
+                    .iter()
+                    .any(|position| position.to_lowercase().contains(&normalized))
+        })
+        .take(100)
+        .map(|record| {
+            json!({
+                "id": record.id,
+                "name": record.name,
+                "positions": record.positions,
+                "managedSquad": record.managed_squad,
+                "visibility": "club-visible"
+            })
+        })
+        .collect()
 }
 
 fn empty_status() -> ConnectorStatus {
@@ -181,6 +263,14 @@ fn empty_status() -> ConnectorStatus {
         parser_status: "unverified",
         state: "process_not_found",
         players_loaded: 0,
+        managed_squad_players: 0,
+        database_players_indexed: 0,
+        background_players_indexed: 0,
+        visible_players_loaded: 0,
+        fully_scouted_players: 0,
+        partial_scout_reports: 0,
+        database_index_status: "not_run",
+        database_scope: "none",
         clubs_loaded: 0,
         last_sync: None,
         bytes_read: 0,
@@ -228,7 +318,13 @@ fn empty_snapshot(status: ConnectorStatus, error: String) -> ConnectorSnapshot {
 }
 
 #[cfg(target_os = "windows")]
-fn collect_snapshot() -> ConnectorSnapshot {
+fn collect_snapshot(
+    include_database_index: bool,
+    progress: Option<&dyn Fn(&'static str)>,
+) -> ConnectorSnapshot {
+    if let Some(progress) = progress {
+        progress("detecting_fm26");
+    }
     let Some((process_id, _)) = find_fm26_process() else {
         let status = empty_status();
         return empty_snapshot(status.clone(), status.message);
@@ -237,6 +333,9 @@ fn collect_snapshot() -> ConnectorSnapshot {
     let mut status = empty_status();
     status.process_detected = true;
     status.process_id = Some(process_id);
+    if let Some(progress) = progress {
+        progress("validating_active_save");
+    }
 
     let mut reader = match ProcessReader::open(process_id) {
         Ok(reader) => reader,
@@ -304,8 +403,19 @@ fn collect_snapshot() -> ConnectorSnapshot {
         return empty_snapshot(status.clone(), status.message);
     }
 
+    if let Some(progress) = progress {
+        progress("reading_managed_club");
+    }
     let mut diagnostics = ExtractionDiagnostics::default();
-    let extracted = extract_live_data(&mut reader, module, profile, &mut diagnostics);
+    let extracted = extract_live_data(
+        &mut reader,
+        module,
+        profile,
+        &mut diagnostics,
+        process_id,
+        include_database_index,
+        progress,
+    );
     status.bytes_read = reader.bytes_read;
     status.entity_root = diagnostics.entity_root.map(hex_address);
     status.save_pointer = diagnostics.save_pointer.map(hex_address);
@@ -315,21 +425,33 @@ fn collect_snapshot() -> ConnectorSnapshot {
 
     match extracted {
         Ok(data) => {
+            if let Some(progress) = progress {
+                progress("ready");
+            }
             status.save_detected = Some(true);
             status.parser_status = "ready";
             status.state = "connected";
             status.players_loaded = data.players.len() as u32;
+            status.managed_squad_players = data.players.len() as u32;
+            status.database_players_indexed = data.database_players_indexed;
+            status.background_players_indexed = data.background_players_indexed;
+            status.visible_players_loaded = data.players.len() as u32;
+            status.fully_scouted_players = 0;
+            status.partial_scout_reports = 0;
+            status.database_index_status = data.database_index_status;
+            status.database_scope = data.database_scope;
             status.clubs_loaded = data.clubs.len() as u32;
             status.pointer_validation = "passed";
             status.last_sync = Some(unix_milliseconds());
             status.message = format!(
-                "Connected to {} with {} live squad players.",
+                "Connected to {} with {} live squad players and {} indexed player records.",
                 data.clubs
                     .first()
                     .and_then(|club| club.get("name"))
                     .and_then(Value::as_str)
                     .unwrap_or("the managed club"),
-                data.players.len()
+                data.players.len(),
+                data.database_players_indexed
             );
             status.warnings = data.warnings.clone();
             ConnectorSnapshot {
@@ -363,7 +485,10 @@ fn collect_snapshot() -> ConnectorSnapshot {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn collect_snapshot() -> ConnectorSnapshot {
+fn collect_snapshot(
+    _include_database_index: bool,
+    _progress: Option<&dyn Fn(&'static str)>,
+) -> ConnectorSnapshot {
     let mut status = empty_status();
     status.message = "The live FM26 connector requires the installed Windows app.".to_string();
     empty_snapshot(status.clone(), status.message)
@@ -375,6 +500,9 @@ fn extract_live_data(
     module: ModuleInfo,
     profile: &EntityMapProfile,
     diagnostics: &mut ExtractionDiagnostics,
+    process_id: u32,
+    include_database_index: bool,
+    progress: Option<&dyn Fn(&'static str)>,
 ) -> Result<LiveData, ExtractionFailure> {
     let signature = profile
         .signatures
@@ -500,6 +628,9 @@ fn extract_live_data(
     )?;
     diagnostics.managed_club_pointer = Some(club);
     diagnostics.last_successful_read = Some("validate_managed_club".to_string());
+    if let Some(progress) = progress {
+        progress("loading_managed_squad");
+    }
 
     let team_uid = reader
         .read_u32(team + profile.constants.entity_uid_offset)
@@ -554,6 +685,9 @@ fn extract_live_data(
     diagnostics.player_collection_pointer = Some(players_start);
     let player_count = ((players_end - players_start) / 8) as usize;
     let mut players = Vec::with_capacity(player_count);
+    let mut managed_player_ids = HashSet::with_capacity(player_count);
+    let mut managed_index_records = Vec::with_capacity(player_count);
+    let mut player_vtable = None;
     for index in 0..player_count {
         let raw_player = reader
             .read_pointer(players_start + (index as u64 * 8))
@@ -564,6 +698,16 @@ fn extract_live_data(
                     "A managed squad player pointer was empty.",
                 )
             })?;
+        let vtable = reader
+            .read_pointer(raw_player)
+            .filter(|value| *value != 0)
+            .ok_or_else(|| {
+                ExtractionFailure::new(
+                    "player_identity",
+                    "A managed squad player type record was invalid.",
+                )
+            })?;
+        player_vtable.get_or_insert(vtable);
         let person = raw_player + profile.constants.player_person_offset;
         let uid = reader
             .read_u32(person + profile.constants.entity_uid_offset)
@@ -618,8 +762,17 @@ fn extract_live_data(
             }
         }
         let calculated_position = positions.first().cloned();
+        let player_id = uid.to_string();
+        managed_player_ids.insert(player_id.clone());
+        managed_index_records.push(IndexedPlayerRecord {
+            id: player_id.clone(),
+            name: name.clone(),
+            positions: positions.clone(),
+            managed_squad: true,
+            visibility_safe: true,
+        });
         players.push(json!({
-            "id": uid.to_string(),
+            "id": player_id,
             "name": name,
             "age": null,
             "nationality": null,
@@ -648,7 +801,7 @@ fn extract_live_data(
             "loanAvailable": null,
             "attributes": {},
             "per90": {},
-            "scoutKnowledge": "fully_known",
+            "scoutKnowledge": "partly_known",
             "bestCalculatedPosition": calculated_position,
             "truePrice": null,
             "fairPriceRange": null,
@@ -662,11 +815,75 @@ fn extract_live_data(
     }
     diagnostics.last_successful_read = Some("extract_managed_squad".to_string());
 
-    let warnings = vec![
+    let (database_players_indexed, background_players_indexed, database_index_status, database_scope) =
+        if include_database_index {
+            if let Some(progress) = progress {
+                progress("indexing_player_database");
+            }
+            let seed_vtable = player_vtable.ok_or_else(|| {
+                ExtractionFailure::new(
+                    "player_database",
+                    "The live squad did not provide a player type signature.",
+                )
+            })?;
+            match index_full_player_database(
+                reader,
+                profile,
+                process_id,
+                diagnostics.save_pointer.unwrap_or_default(),
+                seed_vtable,
+                &managed_player_ids,
+                managed_index_records,
+            ) {
+                Ok(indexed) => {
+                    if let Some(progress) = progress {
+                        progress("building_visibility_index");
+                    }
+                    diagnostics.last_successful_read =
+                        Some("index_full_player_database".to_string());
+                    (
+                        indexed.total,
+                        indexed.background,
+                        "ready",
+                        "full-save-index",
+                    )
+                }
+                Err(_) => (
+                    player_count as u32,
+                    0,
+                    "partial",
+                    "managed-squad",
+                ),
+            }
+        } else {
+            store_player_index(
+                process_id,
+                diagnostics.save_pointer.unwrap_or_default(),
+                managed_index_records,
+            );
+            (
+                player_count as u32,
+                0,
+                "not_run",
+                "managed-squad",
+            )
+        };
+
+    let mut warnings = vec![
         "Player names and positional familiarity are live; age, attributes, form, contract, value, wage and performance fields remain unavailable for this exact map.".to_string(),
         "Live-memory tactic reading is disabled. Tactic Evaluation uses only a user-selected local FMF file.".to_string(),
         "The FM26 shortlist collection is not mapped safely. GlassScout Favorites remains a local list resolved against live players.".to_string(),
     ];
+    if include_database_index && database_index_status == "ready" {
+        warnings.push(format!(
+            "{background_players_indexed} wider-save player records were indexed in memory. They remain hidden from the UI until FM scout-knowledge visibility can be validated."
+        ));
+    } else if include_database_index {
+        warnings.push(
+            "The wider player database could not be indexed safely; only the managed squad is available."
+                .to_string(),
+        );
+    }
     let clubs = vec![json!({
         "id": club_id,
         "name": club_name,
@@ -678,7 +895,146 @@ fn extract_live_data(
         manager_name,
         clubs,
         players,
+        database_players_indexed,
+        background_players_indexed,
+        database_index_status,
+        database_scope,
         warnings,
+    })
+}
+
+#[cfg(target_os = "windows")]
+struct IndexSummary {
+    total: u32,
+    background: u32,
+}
+
+#[cfg(target_os = "windows")]
+fn store_player_index(
+    process_id: u32,
+    save_pointer: u64,
+    records: Vec<IndexedPlayerRecord>,
+) {
+    let records = records
+        .into_iter()
+        .map(|record| (record.id.clone(), record))
+        .collect();
+    let index = PLAYER_DATABASE_INDEX.get_or_init(|| RwLock::new(PlayerDatabaseIndex::default()));
+    if let Ok(mut index) = index.write() {
+        *index = PlayerDatabaseIndex {
+            process_id,
+            save_pointer,
+            records,
+        };
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn index_full_player_database(
+    reader: &mut ProcessReader,
+    profile: &EntityMapProfile,
+    process_id: u32,
+    save_pointer: u64,
+    player_vtable: u64,
+    managed_player_ids: &HashSet<String>,
+    managed_records: Vec<IndexedPlayerRecord>,
+) -> Result<IndexSummary, ExtractionFailure> {
+    let mut records: HashMap<String, IndexedPlayerRecord> = managed_records
+        .into_iter()
+        .map(|record| (record.id.clone(), record))
+        .collect();
+    let candidate_addresses = reader.scan_private_memory_for_pointer(player_vtable)?;
+
+    for address in candidate_addresses {
+        if records.len() >= 250_000 {
+            break;
+        }
+        let Some(mut record) = read_indexed_player_candidate(reader, address, profile) else {
+            continue;
+        };
+        if managed_player_ids.contains(&record.id) {
+            continue;
+        }
+        record.managed_squad = false;
+        record.visibility_safe = false;
+        records.entry(record.id.clone()).or_insert(record);
+    }
+
+    if records.len() < managed_player_ids.len() {
+        return Err(ExtractionFailure::new(
+            "player_database",
+            "The wider player index failed its managed-squad integrity check.",
+        ));
+    }
+
+    let total = records.len() as u32;
+    let background = records
+        .values()
+        .filter(|record| !record.managed_squad)
+        .count() as u32;
+    let index = PLAYER_DATABASE_INDEX.get_or_init(|| RwLock::new(PlayerDatabaseIndex::default()));
+    if let Ok(mut index) = index.write() {
+        *index = PlayerDatabaseIndex {
+            process_id,
+            save_pointer,
+            records,
+        };
+    }
+    Ok(IndexSummary { total, background })
+}
+
+#[cfg(target_os = "windows")]
+fn read_indexed_player_candidate(
+    reader: &mut ProcessReader,
+    raw_player: u64,
+    profile: &EntityMapProfile,
+) -> Option<IndexedPlayerRecord> {
+    let person = raw_player.checked_add(profile.constants.player_person_offset)?;
+    let uid = reader
+        .read_u32(person.checked_add(profile.constants.entity_uid_offset)?)
+        .filter(|uid| *uid > 0)?;
+    let name = display_name(
+        read_name_field(
+            reader,
+            person.checked_add(profile.constants.person_first_name_offset)?,
+        ),
+        read_name_field(
+            reader,
+            person.checked_add(profile.constants.person_second_name_offset)?,
+        ),
+        read_name_field(
+            reader,
+            person.checked_add(profile.constants.person_common_name_offset)?,
+        ),
+    )?;
+    let position_bytes = reader.read_bytes(
+        raw_player.checked_add(profile.constants.player_positions_offset)?,
+        POSITION_NAMES.len(),
+    )?;
+    if position_bytes.iter().any(|rating| *rating > 20)
+        || position_bytes.iter().all(|rating| *rating == 0)
+    {
+        return None;
+    }
+    let mut positions: Vec<String> = position_bytes
+        .iter()
+        .enumerate()
+        .filter(|(_, rating)| **rating >= 15)
+        .map(|(position, _)| POSITION_NAMES[position].to_string())
+        .collect();
+    if positions.is_empty() {
+        let (position, _) = position_bytes
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, rating)| **rating)?;
+        positions.push(POSITION_NAMES[position].to_string());
+    }
+    Some(IndexedPlayerRecord {
+        id: uid.to_string(),
+        name,
+        positions,
+        managed_squad: false,
+        visibility_safe: false,
     })
 }
 
@@ -867,6 +1223,13 @@ struct ModuleInfo {
 }
 
 #[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+struct MemoryRegion {
+    base: u64,
+    size: usize,
+}
+
+#[cfg(target_os = "windows")]
 struct ProcessReader {
     handle: Handle,
     bytes_read: usize,
@@ -1040,6 +1403,83 @@ impl ProcessReader {
         }
         Ok(hits)
     }
+
+    fn scan_private_memory_for_pointer(
+        &mut self,
+        pointer: u64,
+    ) -> Result<Vec<u64>, ExtractionFailure> {
+        const MEM_COMMIT: u32 = 0x1000;
+        const MEM_PRIVATE: u32 = 0x20000;
+        const PAGE_NOACCESS: u32 = 0x01;
+        const PAGE_GUARD: u32 = 0x100;
+        const CHUNK_SIZE: usize = 8 * 1024 * 1024;
+        const MAX_SCAN_BYTES: usize = 8 * 1024 * 1024 * 1024;
+
+        let mut regions = Vec::new();
+        let mut address = 0_u64;
+        let mut considered = 0_usize;
+        loop {
+            let mut info = NativeMemoryInfo::default();
+            let queried = unsafe {
+                VirtualQueryEx(
+                    self.handle,
+                    address as *const std::ffi::c_void,
+                    &mut info,
+                    std::mem::size_of::<NativeMemoryInfo>(),
+                )
+            };
+            if queried == 0 {
+                break;
+            }
+            let base = info.base_address as u64;
+            let size = info.region_size;
+            if size == 0 {
+                break;
+            }
+            let readable = info.state == MEM_COMMIT
+                && info.memory_type == MEM_PRIVATE
+                && info.protect & (PAGE_NOACCESS | PAGE_GUARD) == 0;
+            if readable && considered.saturating_add(size) <= MAX_SCAN_BYTES {
+                regions.push(MemoryRegion { base, size });
+                considered = considered.saturating_add(size);
+            }
+            let next = base.saturating_add(size as u64);
+            if next <= address {
+                break;
+            }
+            address = next;
+        }
+        if regions.is_empty() {
+            return Err(ExtractionFailure::new(
+                "player_database",
+                "No readable FM26 private-memory regions were available for player indexing.",
+            ));
+        }
+
+        let needle = pointer.to_le_bytes();
+        let mut hits = Vec::new();
+        for region in regions {
+            let mut offset = 0_usize;
+            while offset < region.size {
+                let size = CHUNK_SIZE.min(region.size - offset);
+                let Some(bytes) = self.read_bytes(region.base + offset as u64, size) else {
+                    offset = offset.saturating_add(size);
+                    continue;
+                };
+                let base = region.base + offset as u64;
+                let first_aligned = ((8 - (base as usize & 7)) & 7).min(bytes.len());
+                let mut position = first_aligned;
+                while position + needle.len() <= bytes.len() {
+                    if bytes[position..position + needle.len()] == needle {
+                        hits.push(base + position as u64);
+                    }
+                    position += 8;
+                }
+                offset = offset.saturating_add(size);
+            }
+        }
+        Ok(hits)
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -1064,6 +1504,22 @@ struct NativeModuleInfo {
 }
 
 #[cfg(target_os = "windows")]
+#[repr(C)]
+#[derive(Default)]
+struct NativeMemoryInfo {
+    base_address: *mut std::ffi::c_void,
+    allocation_base: *mut std::ffi::c_void,
+    allocation_protect: u32,
+    partition_id: u16,
+    alignment: u16,
+    region_size: usize,
+    state: u32,
+    protect: u32,
+    memory_type: u32,
+    alignment_two: u32,
+}
+
+#[cfg(target_os = "windows")]
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> Handle;
@@ -1082,6 +1538,12 @@ unsafe extern "system" {
         size: usize,
         bytes_read: *mut usize,
     ) -> i32;
+    fn VirtualQueryEx(
+        process: Handle,
+        address: *const std::ffi::c_void,
+        buffer: *mut NativeMemoryInfo,
+        length: usize,
+    ) -> usize;
 }
 
 #[cfg(target_os = "windows")]
@@ -1191,5 +1653,34 @@ mod tests {
                 .as_object()
                 .is_some_and(|value| value.is_empty()));
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn full_save_index_keeps_unvalidated_background_players_hidden() {
+        if find_fm26_process().is_none() {
+            return;
+        }
+        let snapshot = collect_snapshot(true, None);
+        assert_eq!(
+            snapshot.status.state, "connected",
+            "{}",
+            snapshot.status.message
+        );
+        assert_eq!(snapshot.status.database_index_status, "ready");
+        assert_eq!(snapshot.status.database_scope, "full-save-index");
+        assert!(
+            snapshot.status.database_players_indexed
+                >= snapshot.status.managed_squad_players
+        );
+        assert!(snapshot.status.background_players_indexed > 0);
+        assert_eq!(
+            snapshot.status.visible_players_loaded,
+            snapshot.players.len() as u32
+        );
+        let visible_results = search_indexed_players("Jøran".to_string());
+        assert!(visible_results
+            .iter()
+            .all(|player| player["visibility"] == "club-visible"));
     }
 }

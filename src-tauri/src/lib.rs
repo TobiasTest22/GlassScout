@@ -23,6 +23,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             connector::connector_status,
             connector::connector_snapshot,
+            connector::load_active_save,
+            connector::search_indexed_players,
             tactic_file::import_tactic_file,
             tactic_file::tactic_file_status,
             visibility::filter_observations

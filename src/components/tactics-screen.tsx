@@ -2,6 +2,7 @@
 
 import { AlertTriangle, CheckCircle2, FileArchive, Upload } from "lucide-react";
 import type { LiveFootballSnapshot } from "@/domain/adapters";
+import { TacticalBoard } from "@/components/tactical-board";
 import { Button } from "@/components/ui/button";
 
 function formatFileSize(value: number | null | undefined) {
@@ -25,80 +26,76 @@ export function TacticsScreen({
   importing: boolean;
   onImportTactic: () => Promise<void>;
 }) {
-  const tactic = snapshot.tactic;
-  const imported = snapshot.tacticSource === "fmf-file";
-  const parsed = tactic != null && (
+  const parsed = snapshot.tactic != null && (
     snapshot.tacticFileStatus === "parsed" || snapshot.tacticFileStatus === "partially_parsed"
   );
 
   return (
-    <main className="screen tactics-live-screen">
+    <main className="screen tactical-workspace">
       <div className="planner-heading">
         <div>
-          <h1>Tactic Evaluation</h1>
-          <p>Player and squad data remain live from FM26. Tactics come only from the FMF file you choose.</p>
+          <h1>Tactical Board</h1>
+          <p>Live squad context with a user-selected FMF tactic. No role or duty is inferred from memory.</p>
         </div>
         <Button onClick={onImportTactic} disabled={importing}>
           <Upload data-icon="inline-start" />
-          {importing ? "Importing…" : imported ? "Replace FMF tactic" : "Import FMF tactic"}
+          {importing ? "Importing…" : snapshot.tacticFileName ? "Replace FMF tactic" : "Import FMF tactic"}
         </Button>
       </div>
 
-      {!imported ? (
-        <section className="tactic-import-empty">
-          <span><FileArchive /></span>
-          <p className="section-kicker">No tactic file imported</p>
-          <h2>Import your FM tactic file to evaluate tactic fit.</h2>
-          <p>Save your tactic from FM26 as an <strong>.fmf</strong> file, then choose that file here. GlassScout will copy it into local app storage and inspect it safely.</p>
-          <Button onClick={onImportTactic} disabled={importing}><Upload data-icon="inline-start" />Import FMF tactic</Button>
-          {snapshot.tacticFileErrors?.length ? <div className="tactic-import-errors">{snapshot.tacticFileErrors.map((error) => <span key={error}><AlertTriangle />{error}</span>)}</div> : null}
-          {snapshot.status.state !== "connected" ? <small>Live squad connection is also required before tactic-fit calculations can run.</small> : null}
-        </section>
-      ) : (
-        <>
-          <section className="tactic-file-status">
-            <div className="tactic-file-icon"><FileArchive /></div>
-            <div>
-              <span className="section-kicker">Imported FMF tactic</span>
-              <h2>{snapshot.tacticFileName}</h2>
-              <p>{formatFileSize(snapshot.tacticFileSize)} · Imported {formatImportDate(snapshot.tacticImportedAt)}</p>
-            </div>
-            <div className={`tactic-parser-badge tactic-parser-${snapshot.tacticFileStatus}`}>
-              {parsed ? <CheckCircle2 /> : <AlertTriangle />}
-              {snapshot.tacticFileStatus.replaceAll("_", " ")}
-            </div>
+      <div className="tactical-workspace-grid">
+        <TacticalBoard
+          snapshot={snapshot}
+          onImport={onImportTactic}
+          importing={importing}
+        />
+        <aside className="tactical-inspector">
+          <section>
+            <header><FileArchive /><h2>Tactic source</h2></header>
+            <dl>
+              <div><dt>File</dt><dd>{snapshot.tacticFileName ?? "Not imported"}</dd></div>
+              <div><dt>Parser</dt><dd>{snapshot.tacticFileStatus.replaceAll("_", " ")}</dd></div>
+              <div><dt>Formation</dt><dd>{snapshot.tactic?.formation ?? "Unknown"}</dd></div>
+              <div><dt>Imported</dt><dd>{formatImportDate(snapshot.tacticImportedAt)}</dd></div>
+              <div><dt>Size</dt><dd>{formatFileSize(snapshot.tacticFileSize)}</dd></div>
+            </dl>
           </section>
+          <section>
+            <header>{parsed ? <CheckCircle2 /> : <AlertTriangle />}<h2>Analysis readiness</h2></header>
+            <p>
+              {parsed
+                ? "Decoded formation data is available. Fit scores still require visible player attributes."
+                : snapshot.tacticFileName
+                  ? "The FMF container is stored safely, but roles, duties and team instructions are not decoded. The board remains deliberately empty."
+                  : "Import the FMF tactic selected in FM26 to begin tactical analysis."}
+            </p>
+          </section>
+          <section>
+            <header><AlertTriangle /><h2>Instruction evidence</h2></header>
+            {[
+              "Mentality",
+              "Pressing intensity",
+              "Defensive line",
+              "Tempo and passing",
+              "Width and build-up",
+              "Rotations and player instructions",
+            ].map((label) => (
+              <span className="instruction-row" key={label}><b>{label}</b><small>Unknown</small></span>
+            ))}
+          </section>
+        </aside>
+      </div>
 
-          {!parsed ? (
-            <section className="tactic-parser-limited">
-              <AlertTriangle />
-              <div>
-                <h2>Tactic file imported. Parser support needs to be completed for this FMF format.</h2>
-                <p>GlassScout detected and stored the file, but it did not decode a trustworthy formation, role or duty record. No tactic or fit score is being shown.</p>
-                {snapshot.tacticDetectedFormat ? <span>Detected format: {snapshot.tacticDetectedFormat}</span> : null}
-              </div>
-            </section>
-          ) : (
-            <section className="tactic-file-parsed">
-              <div><span>Formation</span><strong>{tactic.formation}</strong></div>
-              <div><span>Roles decoded</span><strong>{tactic.slots.filter((slot) => slot.role).length}</strong></div>
-              <div><span>Duties decoded</span><strong>{tactic.slots.filter((slot) => slot.duty).length}</strong></div>
-              <p>Tactic-fit scores run only from the decoded FMF tactic and readable live player data.</p>
-            </section>
-          )}
-
-          {snapshot.tacticFileWarnings.length ? (
-            <section className="tactic-file-warnings">
-              {snapshot.tacticFileWarnings.map((warning) => <p key={warning}>{warning}</p>)}
-            </section>
-          ) : null}
-          {snapshot.tacticFileErrors?.length ? (
-            <section className="tactic-import-errors">
-              {snapshot.tacticFileErrors.map((error) => <span key={error}><AlertTriangle />{error}</span>)}
-            </section>
-          ) : null}
-        </>
-      )}
+      {snapshot.tacticFileWarnings.length ? (
+        <section className="tactic-file-warnings">
+          {snapshot.tacticFileWarnings.map((warning) => <p key={warning}>{warning}</p>)}
+        </section>
+      ) : null}
+      {snapshot.tacticFileErrors?.length ? (
+        <section className="tactic-import-errors">
+          {snapshot.tacticFileErrors.map((error) => <span key={error}><AlertTriangle />{error}</span>)}
+        </section>
+      ) : null}
     </main>
   );
 }

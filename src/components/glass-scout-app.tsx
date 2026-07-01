@@ -32,6 +32,14 @@ const initialStatus: LiveConnectorStatus = {
   parserStatus: "unverified",
   state: "not_checked",
   playersLoaded: 0,
+  managedSquadPlayers: 0,
+  databasePlayersIndexed: 0,
+  backgroundPlayersIndexed: 0,
+  visiblePlayersLoaded: 0,
+  fullyScoutedPlayers: 0,
+  partialScoutReports: 0,
+  databaseIndexStatus: "not_run",
+  databaseScope: "none",
   clubsLoaded: 0,
   lastSync: null,
   bytesRead: 0,
@@ -79,7 +87,6 @@ export function GlassScoutApp() {
   const [mode, setMode] = useState<"fm26" | null>(null);
   const [screen, setScreen] = useState<Screen>("Dashboard");
   const [search, setSearch] = useState("");
-  const [connection, setConnection] = useState<LiveConnectorStatus>(initialStatus);
   const [snapshot, setSnapshot] = useState<LiveFootballSnapshot>(initialSnapshot);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<FavoriteRecord[]>(() => {
@@ -105,14 +112,12 @@ export function GlassScoutApp() {
     try {
       const nextSnapshot = await fm26LiveAdapter.getSnapshot();
       setSnapshot(nextSnapshot);
-      setConnection(nextSnapshot.status);
       return nextSnapshot.status;
     } finally {
       setChecking(false);
     }
   }, []);
-  const enterWorkspace = useCallback((status: LiveConnectorStatus) => {
-    setConnection(status);
+  const enterWorkspace = useCallback(() => {
     setScreen("Dashboard");
     setMode("fm26");
   }, []);
@@ -145,12 +150,20 @@ export function GlassScoutApp() {
 
   const content =
     screen === "Dashboard" ? <DashboardScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onNavigate={setScreen} /> :
-    screen === "My Team" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onOpenPlayer={openPlayer} /> :
-    screen === "Tactic Evaluation" ? <TacticsScreen snapshot={snapshot} importing={importingTactic} onImportTactic={importTactic} /> :
-    screen === "Role DNA" ? <RoleDnaScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} /> :
-    screen === "Recruitment" ? <RecruitmentScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
-    screen === "Favorites / Shortlist" ? <FavoritedPlayersScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onUpdateNote={updatePlayerNote} /> :
-    screen === "Player Profile" ? <PlayerProfileScreen player={snapshot.players.find((player) => player.id === selectedPlayerId) ?? null} snapshot={snapshot} onBack={() => setScreen("Recruitment")} /> :
+    screen === "Squad Planner" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onOpenPlayer={openPlayer} /> :
+    screen === "Tactical Board" ? <TacticsScreen snapshot={snapshot} importing={importingTactic} onImportTactic={importTactic} /> :
+    screen === "Reports" ? <RoleDnaScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} /> :
+    screen === "Recruitment" || screen === "Scout Room" || screen === "Players" ? <RecruitmentScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
+    screen === "Shortlist" ? <FavoritedPlayersScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onUpdateNote={updatePlayerNote} /> :
+    screen === "Player Profile" ? (
+      <PlayerProfileScreen
+        player={snapshot.players.find((player) => player.id === selectedPlayerId) ?? null}
+        snapshot={snapshot}
+        favorite={selectedPlayerId ? favorites.some((record) => record.playerId === selectedPlayerId) : false}
+        onToggleFavorite={() => selectedPlayerId && togglePlayerFavorite(selectedPlayerId)}
+        onBack={() => setScreen("Players")}
+      />
+    ) :
     <SettingsScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} />;
 
   return (
@@ -158,7 +171,14 @@ export function GlassScoutApp() {
       <div className="app-canvas">
         <AppSidebar screen={screen} onNavigate={setScreen} />
         <section className="app-main">
-          <Topbar search={search} onSearch={setSearch} connection={connection} />
+          <Topbar
+            search={search}
+            onSearch={setSearch}
+            snapshot={snapshot}
+            screen={screen}
+            checking={checking}
+            onRefresh={checkConnection}
+          />
           {search ? (
             <motion.div className="search-result" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
               Searching the current dataset for <strong>“{search}”</strong>
