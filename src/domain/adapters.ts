@@ -19,6 +19,14 @@ export type LiveConnectorStatus = {
   lastSync: string | null;
   bytesRead: number;
   executableHeaderValid: boolean;
+  gameBuild?: string | null;
+  productVersion?: string | null;
+  executableSha256?: string | null;
+  architecture?: string | null;
+  moduleBase?: string | null;
+  entityMapStatus?: "missing" | "matched" | "invalid" | "not_checked";
+  entityMapProfileId?: string | null;
+  pointerValidation?: "not_run" | "passed" | "failed";
   canWriteMemory: false;
   message: string;
   warnings: string[];
@@ -52,6 +60,18 @@ export type LivePlayer = {
   loanInterest: string | null;
   transferAvailable: boolean | null;
   loanAvailable: boolean | null;
+  attributes?: Record<string, number | null>;
+  per90?: Record<string, number | null>;
+  scoutKnowledge?: "fully_known" | "partly_known" | "unknown" | "needs_scouting" | "missing_data";
+  bestCalculatedPosition?: string | null;
+  truePrice?: number | null;
+  fairPriceRange?: [number, number] | null;
+  valuationLabel?: "undervalued" | "fair" | "overpriced" | "unavailable";
+  valuationReasoning?: string[];
+  retrainingSuggestion?: string | null;
+  roleReasoning?: string[];
+  riskLevel?: "low" | "medium" | "high" | "unknown";
+  marketValueAmount?: number | null;
 };
 
 export type LiveClub = {
@@ -85,6 +105,8 @@ export type LiveFootballSnapshot = {
   players: LivePlayer[];
   tactic: LiveTactic | null;
   dataError: string | null;
+  dataSource?: "none" | "live-memory";
+  dataWarnings?: string[];
 };
 
 export interface FootballDataAdapter {
@@ -99,7 +121,7 @@ export interface FutureRealLifeAdapter {
   readonly providerRequired: "licensed-provider";
 }
 
-const browserPreviewStatus: LiveConnectorStatus = {
+const desktopRequiredStatus: LiveConnectorStatus = {
   processDetected: false,
   processId: null,
   processPath: null,
@@ -112,8 +134,16 @@ const browserPreviewStatus: LiveConnectorStatus = {
   lastSync: null,
   bytesRead: 0,
   executableHeaderValid: false,
+  gameBuild: null,
+  productVersion: null,
+  executableSha256: null,
+  architecture: null,
+  moduleBase: null,
+  entityMapStatus: "not_checked",
+  entityMapProfileId: null,
+  pointerValidation: "not_run",
   canWriteMemory: false,
-  message: "Desktop connector unavailable in browser preview. Run the Tauri app to inspect FM26.",
+  message: "GlassScout requires the installed Windows app to connect to the active FM26 game.",
   warnings: ["No live data is being simulated."],
 };
 
@@ -121,7 +151,7 @@ export const fm26LiveAdapter: FootballDataAdapter = {
   kind: "fm26-live",
   async getStatus() {
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
-      return browserPreviewStatus;
+      return desktopRequiredStatus;
     }
 
     try {
@@ -129,7 +159,7 @@ export const fm26LiveAdapter: FootballDataAdapter = {
       return await invoke<LiveConnectorStatus>("connector_status");
     } catch (error) {
       return {
-        ...browserPreviewStatus,
+        ...desktopRequiredStatus,
         state: "access_denied",
         memoryAccess: "denied",
         message: error instanceof Error ? error.message : "The desktop connector could not be reached.",
@@ -139,14 +169,16 @@ export const fm26LiveAdapter: FootballDataAdapter = {
   async getSnapshot() {
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
       return {
-        status: browserPreviewStatus,
+        status: desktopRequiredStatus,
         managedClubId: null,
         managerName: null,
         season: null,
         clubs: [],
         players: [],
         tactic: null,
-        dataError: browserPreviewStatus.message,
+        dataError: desktopRequiredStatus.message,
+        dataSource: "none",
+        dataWarnings: desktopRequiredStatus.warnings,
       };
     }
 
@@ -156,7 +188,7 @@ export const fm26LiveAdapter: FootballDataAdapter = {
     } catch (error) {
       const message = error instanceof Error ? error.message : "The desktop connector could not be reached.";
       return {
-        status: { ...browserPreviewStatus, state: "access_denied", memoryAccess: "denied", message },
+        status: { ...desktopRequiredStatus, state: "access_denied", memoryAccess: "denied", message },
         managedClubId: null,
         managerName: null,
         season: null,
@@ -164,6 +196,8 @@ export const fm26LiveAdapter: FootballDataAdapter = {
         players: [],
         tactic: null,
         dataError: message,
+        dataSource: "none",
+        dataWarnings: [message],
       };
     }
   },

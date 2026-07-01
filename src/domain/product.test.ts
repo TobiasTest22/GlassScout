@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildKnowledgeProfile, describeField } from "./scout-knowledge";
 import { groupPlayerPosition, resolveFavorites, toggleFavorite, updateFavoriteNote } from "./live-data";
 import type { LivePlayer } from "./adapters";
+import { estimateTruePrice, evaluateRoleDna } from "./player-evaluation";
 
 describe("scouting knowledge", () => {
   it("keeps unknown information unknown and excludes blocked fields from coverage", () => {
@@ -67,5 +68,18 @@ describe("favorites", () => {
 
   it("does not preserve stale player payloads when a live entity disappears", () => {
     expect(resolveFavorites([{ playerId: "missing", note: "Old target" }], [livePlayer])).toEqual([]);
+  });
+});
+
+describe("transparent player evaluation", () => {
+  it("can recommend a position outside the player's current listing from visible attributes", () => {
+    const result = evaluateRoleDna({ passing: 17, vision: 18, decisions: 16, firsttouch: 10, positioning: 18, teamwork: 18, composure: 17 });
+    expect(result.position).toBe("DM");
+    expect(result.score).toBeGreaterThan(70);
+    expect(result.reasoning.length).toBeGreaterThan(0);
+  });
+
+  it("does not estimate true price without a visible FM market value", () => {
+    expect(estimateTruePrice({ marketValueAmount: null, age: 22, averageRating: 7.2, minutesPlayed: 900, roleFit: 80, contractStatus: null }).estimate).toBeNull();
   });
 });

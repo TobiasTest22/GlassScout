@@ -1,5 +1,7 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::{fs::File, io::Read, path::Path, sync::OnceLock};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +19,14 @@ pub struct ConnectorStatus {
     bytes_read: usize,
     executable_header_valid: bool,
     can_write_memory: bool,
+    game_build: Option<String>,
+    product_version: Option<String>,
+    executable_sha256: Option<String>,
+    architecture: Option<String>,
+    module_base: Option<String>,
+    entity_map_status: &'static str,
+    entity_map_profile_id: Option<String>,
+    pointer_validation: &'static str,
     message: String,
     warnings: Vec<String>,
 }
@@ -34,6 +44,47 @@ pub struct ConnectorSnapshot {
     data_error: Option<String>,
 }
 
+#[derive(Default)]
+struct ExecutableIdentity {
+    file_version: Option<String>,
+    product_version: Option<String>,
+    sha256: Option<String>,
+    architecture: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EntityMapIndex {
+    schema_version: u32,
+    profiles: Vec<EntityMapProfile>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EntityMapProfile {
+    id: String,
+    file_version: String,
+    product_version: String,
+    executable_sha256: String,
+    architecture: String,
+    module: String,
+    signatures: Vec<EntitySignature>,
+    pointer_chains: Vec<PointerChain>,
+}
+
+#[derive(Deserialize)]
+struct EntitySignature {
+    name: String,
+    pattern: String,
+}
+
+#[derive(Deserialize)]
+struct PointerChain {
+    name: String,
+    root: String,
+    offsets: Vec<u64>,
+}
+
 #[tauri::command]
 pub fn connector_status() -> ConnectorStatus {
     build_status()
@@ -43,7 +94,14 @@ pub fn connector_status() -> ConnectorStatus {
 pub fn connector_snapshot() -> ConnectorSnapshot {
     let status = build_status();
     let data_error = if status.process_detected && status.executable_header_valid {
-        "FM26 process memory is readable, but this installed build has no verified entity map. Active-save, managed-team, player, club and tactic extraction are therefore disabled.".to_string()
+        match status.entity_map_status {
+            "missing" => format!(
+                "FM26 {} is readable, but no verified entity-map profile matches this exact executable. Live player, club and tactic extraction is blocked safely.",
+                status.game_build.as_deref().unwrap_or("build unknown")
+            ),
+            "invalid" => "The matching entity map failed signature or pointer validation. Live extraction was stopped before reading entities.".to_string(),
+            _ => "The active save could not be validated safely.".to_string(),
+        }
     } else {
         status.message.clone()
     };
@@ -69,6 +127,17 @@ fn build_status() -> ConnectorStatus {
         process_path = probe.process_path.clone();
     }
 
+    let identity = process_path
+        .as_deref()
+        .map(read_executable_identity)
+        .unwrap_or_default();
+    let entity_map = find_entity_map(&identity);
+    let entity_map_status = if entity_map.is_some() {
+        "invalid"
+    } else {
+        "missing"
+    };
+
     let (state, memory_access, message) = match (process_id, probe.handle_open, probe.header_valid) {
         (None, _, _) => (
             "process_not_found",
@@ -80,19 +149,25 @@ fn build_status() -> ConnectorStatus {
             "denied",
             "FM26 is running, but GlassScout could not open a read-only process handle.".to_string(),
         ),
+        (Some(pid), true, true) if entity_map.is_none() => (
+            "parser_unverified",
+            "read_only_handle_open",
+            format!(
+                "FM26 process {pid} is readable. Build {} has no matching verified entity map; live entity traversal is disabled safely.",
+                identity.file_version.as_deref().unwrap_or("unknown")
+            ),
+        ),
         (Some(pid), true, true) => (
             "parser_unverified",
             "read_only_handle_open",
             format!(
-                "FM26 process {pid} is readable and its executable header was verified. Save entities are not exposed because this build has no verified entity map."
+                "FM26 process {pid} is readable and a profile matched, but signature and pointer validation are not implemented for that profile."
             ),
         ),
         (Some(pid), true, false) => (
             "parser_unverified",
             "read_only_handle_open",
-            format!(
-                "FM26 process {pid} opened read-only, but the executable memory probe did not validate."
-            ),
+            format!("FM26 process {pid} opened read-only, but the executable memory probe did not validate."),
         ),
     };
 
@@ -110,11 +185,115 @@ fn build_status() -> ConnectorStatus {
         bytes_read: probe.bytes_read,
         executable_header_valid: probe.header_valid,
         can_write_memory: false,
+        game_build: identity.file_version,
+        product_version: identity.product_version,
+        executable_sha256: identity.sha256,
+        architecture: identity.architecture,
+        module_base: probe.module_base,
+        entity_map_status,
+        entity_map_profile_id: entity_map.map(|profile| profile.id.clone()),
+        pointer_validation: "not_run",
         message,
         warnings: vec![
-            "Active-save detection is unavailable until FM26 entity offsets are verified for the installed build.".to_string(),
-            "No player, club, managed-team or tactic values are fabricated when extraction is unavailable.".to_string(),
+            "No verified profile means no save-root, player, club or tactic pointers are followed.".to_string(),
+            "Player, club and tactic extraction was not attempted because entity-map validation did not pass.".to_string(),
         ],
+    }
+}
+
+fn find_entity_map(identity: &ExecutableIdentity) -> Option<&'static EntityMapProfile> {
+    static INDEX: OnceLock<EntityMapIndex> = OnceLock::new();
+    let index = INDEX.get_or_init(|| {
+        serde_json::from_str(include_str!("../entity-maps/index.json"))
+            .expect("embedded entity-map index must be valid JSON")
+    });
+    if index.schema_version != 1 {
+        return None;
+    }
+    index.profiles.iter().find(|profile| {
+        let _declared_shape = (
+            profile.module.as_str(),
+            profile
+                .signatures
+                .iter()
+                .all(|signature| !signature.name.is_empty() && !signature.pattern.is_empty()),
+            profile.pointer_chains.iter().all(|chain| {
+                !chain.name.is_empty() && !chain.root.is_empty() && !chain.offsets.is_empty()
+            }),
+        );
+        identity.file_version.as_deref() == Some(profile.file_version.as_str())
+            && identity.product_version.as_deref() == Some(profile.product_version.as_str())
+            && identity.sha256.as_deref() == Some(profile.executable_sha256.as_str())
+            && identity.architecture.as_deref() == Some(profile.architecture.as_str())
+    })
+}
+
+fn read_executable_identity(path: &str) -> ExecutableIdentity {
+    let mut identity = ExecutableIdentity {
+        sha256: hash_file(path),
+        architecture: read_pe_architecture(path),
+        ..ExecutableIdentity::default()
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        let escaped_path = path.replace('\'', "''");
+        let script = format!(
+            "$v=(Get-Item -LiteralPath '{escaped_path}').VersionInfo; [Console]::Write($v.FileVersion+'|'+$v.ProductVersion)"
+        );
+        if let Ok(output) = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+        {
+            if output.status.success() {
+                let value = String::from_utf8_lossy(&output.stdout);
+                let mut parts = value.splitn(2, '|');
+                identity.file_version = parts
+                    .next()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string);
+                identity.product_version = parts
+                    .next()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string);
+            }
+        }
+    }
+    identity
+}
+
+fn hash_file(path: &str) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).ok()?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Some(format!("{:X}", hasher.finalize()))
+}
+
+fn read_pe_architecture(path: &str) -> Option<String> {
+    let mut file = File::open(Path::new(path)).ok()?;
+    let mut dos_header = [0_u8; 64];
+    file.read_exact(&mut dos_header).ok()?;
+    if &dos_header[..2] != b"MZ" {
+        return None;
+    }
+    let pe_offset = u32::from_le_bytes(dos_header[0x3c..0x40].try_into().ok()?) as u64;
+    use std::io::{Seek, SeekFrom};
+    file.seek(SeekFrom::Start(pe_offset + 4)).ok()?;
+    let mut machine = [0_u8; 2];
+    file.read_exact(&mut machine).ok()?;
+    match u16::from_le_bytes(machine) {
+        0x8664 => Some("x64".to_string()),
+        0x014c => Some("x86".to_string()),
+        _ => Some("unknown".to_string()),
     }
 }
 
@@ -124,6 +303,7 @@ struct MemoryProbe {
     bytes_read: usize,
     header_valid: bool,
     process_path: Option<String>,
+    module_base: Option<String>,
 }
 
 #[cfg(target_os = "windows")]
@@ -132,11 +312,9 @@ fn find_fm26_process() -> Option<(u32, Option<String>)> {
         .args(["/FI", "IMAGENAME eq fm.exe", "/FO", "CSV", "/NH"])
         .output()
         .ok()?;
-
     if !output.status.success() {
         return None;
     }
-
     let stdout = String::from_utf8_lossy(&output.stdout);
     let row = stdout
         .lines()
@@ -154,7 +332,6 @@ fn find_fm26_process() -> Option<(u32, Option<String>)> {
 #[cfg(target_os = "windows")]
 fn probe_process_memory(process_id: u32) -> MemoryProbe {
     use std::ffi::c_void;
-
     type Handle = *mut c_void;
     const PROCESS_VM_READ: u32 = 0x0010;
     const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
@@ -178,7 +355,6 @@ fn probe_process_memory(process_id: u32) -> MemoryProbe {
             bytes_read: *mut usize,
         ) -> i32;
     }
-
     #[link(name = "psapi")]
     unsafe extern "system" {
         fn EnumProcessModules(
@@ -199,12 +375,10 @@ fn probe_process_memory(process_id: u32) -> MemoryProbe {
     if handle.is_null() {
         return MemoryProbe::default();
     }
-
     let mut probe = MemoryProbe {
         handle_open: true,
         ..MemoryProbe::default()
     };
-
     let mut path_buffer = vec![0_u16; 32_768];
     let mut path_size = path_buffer.len() as u32;
     if unsafe { QueryFullProcessImageNameW(handle, 0, path_buffer.as_mut_ptr(), &mut path_size) }
@@ -212,7 +386,6 @@ fn probe_process_memory(process_id: u32) -> MemoryProbe {
     {
         probe.process_path = Some(String::from_utf16_lossy(&path_buffer[..path_size as usize]));
     }
-
     let mut module: Handle = std::ptr::null_mut();
     let mut needed = 0_u32;
     let module_found = unsafe {
@@ -223,8 +396,8 @@ fn probe_process_memory(process_id: u32) -> MemoryProbe {
             &mut needed,
         )
     } != 0;
-
     if module_found && !module.is_null() {
+        probe.module_base = Some(format!("0x{:X}", module as usize));
         let mut header = [0_u8; 2];
         let mut bytes_read = 0_usize;
         let read_ok = unsafe {
@@ -239,7 +412,6 @@ fn probe_process_memory(process_id: u32) -> MemoryProbe {
         probe.bytes_read = bytes_read;
         probe.header_valid = read_ok && bytes_read == header.len() && header == *b"MZ";
     }
-
     unsafe {
         CloseHandle(handle);
     }
@@ -257,8 +429,7 @@ mod tests {
 
     #[test]
     fn connector_contract_never_advertises_write_access() {
-        let status = connector_status();
-        assert!(!status.can_write_memory);
+        assert!(!connector_status().can_write_memory);
     }
 
     #[test]
@@ -268,5 +439,13 @@ mod tests {
         assert!(snapshot.clubs.is_empty());
         assert!(snapshot.tactic.is_none());
         assert!(snapshot.managed_club_id.is_none());
+    }
+
+    #[test]
+    fn entity_map_index_has_expected_schema_and_no_unverified_profiles() {
+        let index: EntityMapIndex =
+            serde_json::from_str(include_str!("../entity-maps/index.json")).unwrap();
+        assert_eq!(index.schema_version, 1);
+        assert!(index.profiles.is_empty());
     }
 }

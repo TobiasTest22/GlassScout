@@ -2,7 +2,7 @@
 
 import {
   BrainCircuit,
-  Database,
+  Dna,
   Gauge,
   LayoutDashboard,
   ListChecks,
@@ -18,19 +18,20 @@ import { cn } from "@/lib/utils";
 export type Screen =
   | "Dashboard"
   | "My Team"
-  | "Tactics"
+  | "Tactic Evaluation"
+  | "Role DNA"
   | "Recruitment"
-  | "Favorited Players"
-  | "Memory Center"
+  | "Favorites / Shortlist"
+  | "Player Profile"
   | "Settings";
 
 const navigation = [
   { label: "Dashboard", icon: LayoutDashboard },
   { label: "My Team", icon: UsersRound },
-  { label: "Tactics", icon: Target },
+  { label: "Tactic Evaluation", icon: Target },
+  { label: "Role DNA", icon: Dna },
   { label: "Recruitment", icon: ListChecks },
-  { label: "Favorited Players", icon: Star },
-  { label: "Memory Center", icon: Database },
+  { label: "Favorites / Shortlist", icon: Star },
   { label: "Settings", icon: Settings },
 ] satisfies { label: Screen; icon: typeof Gauge }[];
 

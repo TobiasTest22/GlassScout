@@ -1,27 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { Check, CircleDot, Database, Globe2, LockKeyhole, ShieldCheck, UsersRound } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect } from "react";
+import { Check, Download, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import type { LiveConnectorStatus } from "@/domain/adapters";
-
-const waitingStatus: LiveConnectorStatus = {
-  processDetected: false,
-  processId: null,
-  processPath: null,
-  saveDetected: null,
-  memoryAccess: "not_checked",
-  parserStatus: "unverified",
-  state: "not_checked",
-  playersLoaded: 0,
-  clubsLoaded: 0,
-  lastSync: null,
-  bytesRead: 0,
-  executableHeaderValid: false,
-  canWriteMemory: false,
-  message: "Waiting for a read-only desktop diagnostic.",
-  warnings: [],
-};
+import { windowsInstallerUrl } from "@/domain/distribution";
+import { cn } from "@/lib/utils";
 
 export function StartupScreen({
   onConnect,
@@ -30,84 +14,51 @@ export function StartupScreen({
   onConnect: () => Promise<LiveConnectorStatus>;
   onEnter: (status: LiveConnectorStatus) => void;
 }) {
-  const [checking, setChecking] = useState(false);
-  const [status, setStatus] = useState(waitingStatus);
+  const desktopRuntime = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-  const connect = async () => {
-    setChecking(true);
-    const next = await onConnect();
-    setStatus(next);
-    setChecking(false);
-  };
+  useEffect(() => {
+    if (!desktopRuntime) return;
+    let active = true;
+    void onConnect().then((status) => {
+      if (active) onEnter(status);
+    });
+    return () => {
+      active = false;
+    };
+  }, [desktopRuntime, onConnect, onEnter]);
 
   return (
-    <main className="startup-screen">
+    <main className="startup-screen live-startup">
       <div className="startup-brand">
         <span className="brand-mark"><span /></span>
         <span><strong>GlassScout</strong><small>FM26</small></span>
       </div>
 
-      <header className="startup-heading">
-        <h1>Choose your data world</h1>
-        <p>GlassScout keeps every recommendation tied to what your recruitment team actually knows.</p>
-      </header>
-
-      <section className="mode-grid">
-        <article className="mode-card mode-card-active">
-          <div className="mode-card-title">
-            <span className="mode-icon">FM<br />26</span>
-            <div><h2>Football Manager 2026</h2><strong>Supported now</strong></div>
-          </div>
-          <p>Connect to a running FM26 save through a local, read-only memory adapter.</p>
-          <ul>
-            <li><UsersRound />Live squad and player data</li>
-            <li><ShieldCheck />Scout knowledge preserved</li>
-            <li><LockKeyhole />No game-state writes</li>
-          </ul>
-          <Button onClick={connect} disabled={checking}>
-            <Database data-icon="inline-start" />
-            {checking ? "Checking FM26…" : "Connect to FM26"}
+      <section className="live-start-card">
+        <span className="live-start-icon"><ShieldCheck /></span>
+        <p className="section-kicker">Live FM26 connection</p>
+        <h1>{desktopRuntime ? "Connecting to Football Manager 26" : "Install GlassScout for Windows"}</h1>
+        <p>
+          {desktopRuntime
+            ? "Open FM26 and load your save. GlassScout will detect the active game and validate live access automatically."
+            : "GlassScout reads the active FM26 game through its installed Windows desktop connector."}
+        </p>
+        {desktopRuntime ? (
+          <Button disabled>
+            <RefreshCw data-icon="inline-start" className="spin" />
+            Checking live connection…
           </Button>
-          <small>FM data reflects the game database, not guaranteed real-life accuracy.</small>
-        </article>
-
-        <article className="mode-card mode-card-disabled" data-disabled="true">
-          <div className="mode-card-title">
-            <span className="mode-icon"><Globe2 /></span>
-            <div><h2>Real-life Team</h2><strong>Future mode</strong></div>
-          </div>
-          <p>Will require a licensed football data provider such as FotMob or similar.</p>
-          <ul>
-            <li><UsersRound />Live real-world squad data</li>
-            <li><ShieldCheck />Provider-backed scouting evidence</li>
-            <li><LockKeyhole />Licensed data access</li>
-          </ul>
-          <Button disabled>Coming later</Button>
-          <small>No real-life data is simulated or bundled.</small>
-        </article>
-      </section>
-
-      <section className="startup-diagnostics" aria-live="polite">
-        <h2>Connection diagnostics</h2>
-        <div>
-          <span><CircleDot /><strong>Process</strong><b className={status.processDetected ? "diag-good" : ""}>{status.processDetected ? `Detected · PID ${status.processId}` : "Waiting"}</b></span>
-          <span><Database /><strong>Memory access</strong><b className={status.memoryAccess === "read_only_handle_open" ? "diag-good" : ""}>{status.memoryAccess.replaceAll("_", " ")}</b></span>
-          <span><Check /><strong>Parser</strong><b className={status.parserStatus === "ready" ? "diag-good" : "diag-watch"}>{status.parserStatus}</b></span>
-          <span><CircleDot /><strong>Loaded</strong><b>{status.playersLoaded} players · {status.clubsLoaded} clubs</b></span>
+        ) : (
+          <a className={cn(buttonVariants({ size: "lg" }), "setup-download")} href={windowsInstallerUrl}>
+            <Download data-icon="inline-start" />Download GlassScout for Windows
+          </a>
+        )}
+        <div className="live-start-trust">
+          <span><Check />Active game only</span>
+          <span><LockKeyhole />Read-only access</span>
+          <span><ShieldCheck />No simulated players</span>
         </div>
-        <p>{status.message}</p>
-        {status.state !== "not_checked" ? (
-          <Button variant="outline" onClick={() => onEnter(status)}>
-            Open FM26 workspace
-          </Button>
-        ) : null}
       </section>
-
-      <footer className="trust-strip">
-        <span><Check />Local-first</span>
-        <span><LockKeyhole />Read-only</span>
-        <span><ShieldCheck />No simulated data</span>
-      </footer>
     </main>
   );
 }

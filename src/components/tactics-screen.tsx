@@ -15,7 +15,7 @@ export function TacticsScreen({
 }) {
   const tactic = snapshot.tactic;
   if (snapshot.status.state !== "connected" || !tactic) {
-    return <main className="screen"><LiveDataState snapshot={snapshot} title="Tactics" checking={checking} onRefresh={onRefresh} /></main>;
+    return <main className="screen"><LiveDataState snapshot={snapshot} title="Tactic Evaluation" checking={checking} onRefresh={onRefresh} /></main>;
   }
 
   const playersById = new Map(snapshot.players.map((player) => [player.id, player]));

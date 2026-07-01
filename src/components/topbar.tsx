@@ -13,8 +13,8 @@ export function Topbar({ search, onSearch, connection }: { search: string; onSea
       <div className="search-wrap">
         <Search aria-hidden="true" />
         <Input
-          aria-label="Search live players and reports"
-          placeholder={connected ? "Search live players and reports…" : "Live FM26 data required for search"}
+          aria-label="Search players and reports"
+          placeholder={connected ? "Search players and reports…" : "Waiting for FM26 live data"}
           value={search}
           onChange={(event) => onSearch(event.target.value)}
           disabled={!connected}
@@ -24,9 +24,9 @@ export function Topbar({ search, onSearch, connection }: { search: string; onSea
       <div className="topbar-actions">
         <Badge variant="outline" className="sync-badge">
           <span className={connected ? "live-dot" : "neutral-dot"} />
-          {connected ? "FM26 live" : connection.processDetected ? "FM26 detected · data unavailable" : "FM26 diagnostics"}
+          {connected ? "FM26 live" : connection.processDetected ? "FM26 detected · connection blocked" : "Waiting for FM26"}
         </Badge>
-        <Button variant="outline" size="icon" aria-label={connected ? "FM26 live data connected" : "FM26 data requires attention"}>
+        <Button variant="outline" size="icon" aria-label={connected ? "Football data connected" : "FM26 data requires attention"}>
           {connected ? <Wifi /> : <WifiOff />}
         </Button>
         <Button variant="ghost" size="icon" aria-label="Notifications"><Bell /></Button>

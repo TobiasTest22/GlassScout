@@ -44,13 +44,13 @@ export function FavoritedPlayersScreen({
   };
 
   if (snapshot.status.state !== "connected" || snapshot.players.length === 0) {
-    return <main className="screen"><LiveDataState snapshot={snapshot} title="Favorited Players" checking={checking} onRefresh={onRefresh} /></main>;
+    return <main className="screen"><LiveDataState snapshot={snapshot} title="Favorites / Shortlist" checking={checking} onRefresh={onRefresh} /></main>;
   }
 
   return (
     <main className="screen favorites-screen">
       <div className="planner-heading">
-        <div><h1>Favorited Players</h1><p>Your working target list, refreshed from the current FM26 save.</p></div>
+        <div><h1>Favorites / Shortlist</h1><p>Your working target list, resolved against the latest verified dataset.</p></div>
         <div className="live-source-label"><Star />{resolved.length} live favorites</div>
       </div>
       <section className="favorites-toolbar">
