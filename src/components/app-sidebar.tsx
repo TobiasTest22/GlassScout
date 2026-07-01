@@ -23,6 +23,7 @@ export type Screen =
   | "Role DNA"
   | "Recruitment"
   | "Favorites / Shortlist"
+  | "Player Profile"
   | "Data / Sync Status"
   | "Settings";
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDownUp, Search, Star, UserCheck } from "lucide-react";
+import { ArrowDownUp, ExternalLink, Search, Star, UserCheck } from "lucide-react";
 import type { LiveFootballSnapshot } from "@/domain/adapters";
 import type { FavoriteRecord } from "@/domain/live-data";
 import { LiveDataState } from "@/components/live-data-state";
@@ -16,12 +16,14 @@ export function RecruitmentScreen({
   checking,
   onRefresh,
   onToggleFavorite,
+  onOpenPlayer,
 }: {
   snapshot: LiveFootballSnapshot;
   favorites: FavoriteRecord[];
   checking: boolean;
   onRefresh: () => Promise<unknown>;
   onToggleFavorite: (playerId: string) => void;
+  onOpenPlayer: (playerId: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState("All positions");
@@ -93,7 +95,7 @@ export function RecruitmentScreen({
       </div>
 
       <section className="live-player-table recruitment-live-table">
-        <header><span>Player</span><span>Best role</span><span>Interest</span><span>Availability</span><span>Role fit</span><span>FM / true price</span><span>Favorite</span></header>
+        <header><span>Player</span><span>Best role</span><span>Interest</span><span>Availability</span><span>Role fit</span><span>FM / true price</span><span>Actions</span></header>
         {players.map((player) => {
           const club = player.clubId ? clubById.get(player.clubId) : null;
           return (
@@ -107,7 +109,10 @@ export function RecruitmentScreen({
                 <strong>{player.value ?? "FM value unknown"}</strong>
                 <small>{player.truePrice == null ? "True price unavailable" : `True price €${player.truePrice}m`}</small>
               </div>
-              <Button variant={favoriteIds.has(player.id) ? "secondary" : "outline"} size="icon-sm" aria-label={`${favoriteIds.has(player.id) ? "Remove" : "Add"} ${player.name} favorite`} onClick={() => onToggleFavorite(player.id)}><Star /></Button>
+              <div className="player-row-actions">
+                <Button variant="outline" size="icon-sm" aria-label={`Open ${player.name} profile`} onClick={() => onOpenPlayer(player.id)}><ExternalLink /></Button>
+                <Button variant={favoriteIds.has(player.id) ? "secondary" : "outline"} size="icon-sm" aria-label={`${favoriteIds.has(player.id) ? "Remove" : "Add"} ${player.name} favorite`} onClick={() => onToggleFavorite(player.id)}><Star /></Button>
+              </div>
             </article>
           );
         })}

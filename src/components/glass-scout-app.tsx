@@ -11,6 +11,7 @@ import { RoleDnaScreen } from "@/components/role-dna-screen";
 import { RecruitmentScreen } from "@/components/recruitment-screen";
 import { FavoritedPlayersScreen } from "@/components/favorited-players-screen";
 import { DataSyncScreen } from "@/components/data-sync-screen";
+import { PlayerProfileScreen } from "@/components/player-profile-screen";
 import { StartupScreen } from "@/components/startup-screen";
 import { SettingsScreen } from "@/components/settings-screen";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -64,6 +65,7 @@ export function GlassScoutApp() {
   const [connection, setConnection] = useState<LiveConnectorStatus>(initialStatus);
   const [snapshot, setSnapshot] = useState<LiveFootballSnapshot>(initialSnapshot);
   const [exportDiagnostics, setExportDiagnostics] = useState<ExportDiagnostics | null>(null);
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<FavoriteRecord[]>(() => {
     if (typeof window === "undefined") return [];
     const stored = window.localStorage.getItem("glassscout-favorites-v1");
@@ -97,6 +99,10 @@ export function GlassScoutApp() {
   };
   const togglePlayerFavorite = (playerId: string) => setFavorites((current) => toggleFavorite(current, playerId));
   const updatePlayerNote = (playerId: string, note: string) => setFavorites((current) => updateFavoriteNote(current, playerId, note));
+  const openPlayer = (playerId: string) => {
+    setSelectedPlayerId(playerId);
+    setScreen("Player Profile");
+  };
 
   if (mode === null) {
     return (
@@ -112,11 +118,12 @@ export function GlassScoutApp() {
 
   const content =
     screen === "Dashboard" ? <DashboardScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onNavigate={setScreen} /> :
-    screen === "My Team" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} /> :
+    screen === "My Team" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onOpenPlayer={openPlayer} /> :
     screen === "Tactic Evaluation" ? <TacticsScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} /> :
     screen === "Role DNA" ? <RoleDnaScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} /> :
-    screen === "Recruitment" ? <RecruitmentScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} /> :
+    screen === "Recruitment" ? <RecruitmentScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
     screen === "Favorites / Shortlist" ? <FavoritedPlayersScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onUpdateNote={updatePlayerNote} /> :
+    screen === "Player Profile" ? <PlayerProfileScreen player={snapshot.players.find((player) => player.id === selectedPlayerId) ?? null} snapshot={snapshot} onBack={() => setScreen("Recruitment")} /> :
     screen === "Data / Sync Status" ? <DataSyncScreen status={connection} snapshot={snapshot} diagnostics={exportDiagnostics} checking={checking} onCheck={checkConnection} onImport={acceptExportSnapshot} /> :
     <SettingsScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} />;
 

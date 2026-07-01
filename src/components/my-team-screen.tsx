@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { Activity, ArrowDown, ArrowUp, ShieldAlert, UsersRound } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ExternalLink, ShieldAlert, UsersRound } from "lucide-react";
 import type { LiveFootballSnapshot, LivePlayer } from "@/domain/adapters";
 import { groupSquad, positionGroups } from "@/domain/live-data";
 import { LiveDataState } from "@/components/live-data-state";
+import { Button } from "@/components/ui/button";
 
-function PlayerRow({ player }: { player: LivePlayer }) {
+function PlayerRow({ player, onOpenPlayer }: { player: LivePlayer; onOpenPlayer: (playerId: string) => void }) {
   const goalsPer90 = player.per90?.goalsPer90;
   const assistsPer90 = player.per90?.assistsPer90;
   return (
@@ -20,6 +21,7 @@ function PlayerRow({ player }: { player: LivePlayer }) {
       <span>{goalsPer90 == null ? "G/90 —" : `${goalsPer90} G/90`}<small>{assistsPer90 == null ? "A/90 —" : `${assistsPer90} A/90`} · {player.averageRating == null ? "rating —" : player.averageRating.toFixed(2)}</small></span>
       <span className={`knowledge-${player.scoutKnowledge ?? "unknown"}`}>{(player.scoutKnowledge ?? "unknown").replaceAll("_", " ")}<small>{player.riskLevel ?? "unknown"} data risk</small></span>
       <span>{player.retrainingSuggestion ?? "No retraining signal"}<small>{player.roleReasoning?.join(" · ") || "Insufficient visible attributes"}</small></span>
+      <Button variant="outline" size="sm" onClick={() => onOpenPlayer(player.id)}>Profile<ExternalLink /></Button>
     </article>
   );
 }
@@ -28,10 +30,12 @@ export function MyTeamScreen({
   snapshot,
   checking,
   onRefresh,
+  onOpenPlayer,
 }: {
   snapshot: LiveFootballSnapshot;
   checking: boolean;
   onRefresh: () => Promise<unknown>;
+  onOpenPlayer: (playerId: string) => void;
 }) {
   const squad = useMemo(
     () => snapshot.players.filter((player) => player.clubId === snapshot.managedClubId),
@@ -65,14 +69,14 @@ export function MyTeamScreen({
       </section>
 
       <section className="squad-live-table squad-live-table-rich">
-        <header><span>Player</span><span>Position</span><span>Best role</span><span>Fit</span><span>Value / true price</span><span>Wage / contract</span><span>Per 90</span><span>Knowledge</span><span>Retraining</span></header>
+        <header><span>Player</span><span>Position</span><span>Best role</span><span>Fit</span><span>Value / true price</span><span>Wage / contract</span><span>Per 90</span><span>Knowledge</span><span>Retraining</span><span>Details</span></header>
         {positionGroups.map((group) => {
           const players = groups.get(group) ?? [];
           if (players.length === 0) return null;
           return (
             <div className="squad-position-group" key={group}>
               <h2>{group}<span>{players.length}</span></h2>
-              {players.map((player) => <PlayerRow key={player.id} player={player} />)}
+              {players.map((player) => <PlayerRow key={player.id} player={player} onOpenPlayer={onOpenPlayer} />)}
             </div>
           );
         })}
