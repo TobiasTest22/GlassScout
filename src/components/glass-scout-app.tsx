@@ -64,6 +64,7 @@ const initialStatus: LiveConnectorStatus = {
   failureStage: null,
   lastSuccessfulRead: null,
   windowsErrorCode: null,
+  readPipeline: [],
   canWriteMemory: false,
   message: "Diagnostics have not run yet.",
   warnings: [],

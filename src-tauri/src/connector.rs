@@ -32,6 +32,15 @@ use crate::{
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReadPipelineStage {
+    key: &'static str,
+    label: &'static str,
+    state: &'static str,
+    detail: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectorStatus {
     process_detected: bool,
     process_id: Option<u32>,
@@ -74,6 +83,7 @@ pub struct ConnectorStatus {
     failure_stage: Option<String>,
     last_successful_read: Option<String>,
     windows_error_code: Option<u32>,
+    read_pipeline: Vec<ReadPipelineStage>,
     message: String,
     warnings: Vec<String>,
 }
@@ -378,12 +388,14 @@ fn empty_status() -> ConnectorStatus {
         failure_stage: None,
         last_successful_read: None,
         windows_error_code: None,
+        read_pipeline: Vec::new(),
         message: "FM26 is not running. Open FM26 and load your save to begin.".to_string(),
         warnings: Vec::new(),
     }
 }
 
-fn empty_snapshot(status: ConnectorStatus, error: String) -> ConnectorSnapshot {
+fn empty_snapshot(mut status: ConnectorStatus, error: String) -> ConnectorSnapshot {
+    status.read_pipeline = build_read_pipeline(&status);
     ConnectorSnapshot {
         status,
         managed_club_id: None,
@@ -397,6 +409,228 @@ fn empty_snapshot(status: ConnectorStatus, error: String) -> ConnectorSnapshot {
         data_source: "none",
         data_warnings: Vec::new(),
     }
+}
+
+fn pipeline_stage(
+    key: &'static str,
+    label: &'static str,
+    state: &'static str,
+    detail: impl Into<String>,
+) -> ReadPipelineStage {
+    ReadPipelineStage {
+        key,
+        label,
+        state,
+        detail: detail.into(),
+    }
+}
+
+fn build_read_pipeline(status: &ConnectorStatus) -> Vec<ReadPipelineStage> {
+    let mut stages = Vec::new();
+
+    stages.push(pipeline_stage(
+        "process",
+        "FM26 process",
+        if status.process_detected {
+            "passed"
+        } else {
+            "blocked"
+        },
+        status
+            .process_id
+            .map(|pid| format!("Detected fm.exe process {pid}."))
+            .unwrap_or_else(|| "FM26 is not running or was not found by process scan.".to_string()),
+    ));
+
+    stages.push(pipeline_stage(
+        "read_only_access",
+        "Read-only memory access",
+        match status.memory_access {
+            "read_only_handle_open" => "passed",
+            "denied" => "blocked",
+            _ => "pending",
+        },
+        match status.memory_access {
+            "read_only_handle_open" => format!(
+                "Handle opened with read-only flags: {}.",
+                status.handle_access_flags
+            ),
+            "denied" => "Windows denied the read-only process handle.".to_string(),
+            _ => "Read-only handle has not been opened yet.".to_string(),
+        },
+    ));
+
+    stages.push(pipeline_stage(
+        "exact_build",
+        "Exact FM26 build map",
+        if status.entity_map_status == "matched" {
+            "passed"
+        } else if status.process_detected {
+            "blocked"
+        } else {
+            "pending"
+        },
+        status
+            .entity_map_profile_id
+            .as_ref()
+            .map(|id| format!("Matched entity-map profile {id}."))
+            .unwrap_or_else(|| {
+                format!(
+                    "No safe entity map matched build {} / {}.",
+                    status.game_build.as_deref().unwrap_or("unknown"),
+                    status.product_version.as_deref().unwrap_or("unknown")
+                )
+            }),
+    ));
+
+    stages.push(pipeline_stage(
+        "module_validation",
+        "Game module validation",
+        if status.executable_header_valid {
+            "passed"
+        } else if status.entity_map_status == "matched" {
+            "blocked"
+        } else {
+            "pending"
+        },
+        status
+            .module_base
+            .as_ref()
+            .map(|base| {
+                format!(
+                    "Validated FM26 module at {base}; {} bytes read.",
+                    status.bytes_read
+                )
+            })
+            .unwrap_or_else(|| "FM26 module base was not available.".to_string()),
+    ));
+
+    stages.push(pipeline_stage(
+        "active_save",
+        "Active save and manager",
+        if status.save_detected == Some(true) || status.save_pointer.is_some() {
+            "passed"
+        } else if status.failure_stage.is_some() {
+            "blocked"
+        } else {
+            "pending"
+        },
+        status
+            .save_pointer
+            .as_ref()
+            .map(|pointer| format!("Active human manager pointer resolved at {pointer}."))
+            .unwrap_or_else(|| {
+                "Active save / human manager pointer has not been resolved.".to_string()
+            }),
+    ));
+
+    stages.push(pipeline_stage(
+        "managed_club",
+        "Managed club",
+        if status.managed_club_pointer.is_some() {
+            "passed"
+        } else if status.failure_stage.as_deref() == Some("managed_club") {
+            "blocked"
+        } else {
+            "pending"
+        },
+        status
+            .managed_club_pointer
+            .as_ref()
+            .map(|pointer| format!("Managed club object validated at {pointer}."))
+            .unwrap_or_else(|| "Managed club object is not validated yet.".to_string()),
+    ));
+
+    stages.push(pipeline_stage(
+        "managed_squad",
+        "Managed squad memory",
+        if status.managed_squad_players > 0 {
+            "passed"
+        } else if status.failure_stage.as_deref() == Some("player_collection") {
+            "blocked"
+        } else {
+            "pending"
+        },
+        if status.managed_squad_players > 0 {
+            format!(
+                "{} squad players read from FM26 memory; {} visible player profiles loaded.",
+                status.managed_squad_players, status.visible_players_loaded
+            )
+        } else {
+            "Managed squad collection has not produced readable players yet.".to_string()
+        },
+    ));
+
+    stages.push(pipeline_stage(
+        "full_player_index",
+        "Player database index",
+        match status.database_index_status {
+            "ready" => "passed",
+            "partial" => "warning",
+            "failed" => "warning",
+            _ => "pending",
+        },
+        format!(
+            "{} indexed records; {} background records gated by scout knowledge; scope {}.",
+            status.database_players_indexed,
+            status.background_players_indexed,
+            status.database_scope
+        ),
+    ));
+
+    stages.push(pipeline_stage(
+        "live_tactic",
+        "Live tactic memory",
+        match status.live_memory_tactic_read {
+            "ready" => "passed",
+            "object_detected_unmapped" => "warning",
+            "object_not_found" => "warning",
+            _ => "pending",
+        },
+        match status.live_memory_tactic_read {
+            "ready" => "Active tactic manager, formation and selected XI validated.".to_string(),
+            "object_detected_unmapped" => {
+                "Tactic manager found, but selected-slot block did not validate for this read."
+                    .to_string()
+            }
+            "object_not_found" => {
+                "No active tactic manager object was found in the current read.".to_string()
+            }
+            _ => "Tactic memory read has not run yet.".to_string(),
+        },
+    ));
+
+    let validated: u32 = status
+        .mapping_coverage
+        .iter()
+        .map(|item| item.validated)
+        .sum();
+    let candidate: u32 = status
+        .mapping_coverage
+        .iter()
+        .map(|item| item.candidate)
+        .sum();
+    let unmapped: u32 = status
+        .mapping_coverage
+        .iter()
+        .map(|item| item.unmapped)
+        .sum();
+    stages.push(pipeline_stage(
+        "field_mapping",
+        "Field mapping coverage",
+        if status.entity_map_status != "matched" {
+            "pending"
+        } else if unmapped > 0 || candidate > 0 {
+            "warning"
+        } else {
+            "passed"
+        },
+        format!(
+            "{validated} validated fields, {candidate} candidate fields and {unmapped} unmapped fields for this exact build."
+        ),
+    ));
+
+    stages
 }
 
 #[cfg(target_os = "windows")]
@@ -540,7 +774,7 @@ fn collect_snapshot(
             status.tactic_manager_pointer = data.tactic_manager_pointer.map(hex_address);
             status.last_sync = Some(unix_milliseconds());
             status.message = format!(
-                "Connected to {} with {} live squad players and {} indexed player records.",
+                "Live FM26 read connected: active club {}, {} managed-squad players from memory, {} indexed player records. See the data pipeline for mapped and unmapped fields.",
                 data.clubs
                     .first()
                     .and_then(|club| club.get("name"))
@@ -550,6 +784,7 @@ fn collect_snapshot(
                 data.database_players_indexed
             );
             status.warnings = data.warnings.clone();
+            status.read_pipeline = build_read_pipeline(&status);
             ConnectorSnapshot {
                 status,
                 managed_club_id: Some(data.managed_club_id),

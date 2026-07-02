@@ -11,13 +11,21 @@ export function TacticsScreen({ snapshot, onOpenPlayer }: { snapshot: LiveFootba
   const rolesResolved = snapshot.tactic?.rolesResolved ?? 0;
   const dutiesResolved = snapshot.tactic?.dutiesResolved ?? 0;
   const roleDutyStatus = snapshot.tactic?.roleDutyDecoderStatus ?? "packet-not-validated";
+  const tacticReadLabel =
+    snapshot.status.liveMemoryTacticRead === "ready"
+      ? "Validated"
+      : snapshot.status.liveMemoryTacticRead === "object_detected_unmapped"
+        ? "Object found, slot decoder blocked"
+        : snapshot.status.liveMemoryTacticRead === "object_not_found"
+          ? "Object not found"
+          : "Not run";
 
   return (
     <main className="screen tactical-workspace">
       <div className="planner-heading">
         <div>
           <h1>Tactical Board</h1>
-          <p>The board follows the active tactic in the connected FM26 save. There is no file import or fallback tactic.</p>
+          <p>The board uses only the active tactic object read from FM26 memory. If a block does not validate, GlassScout explains the blocked stage instead of drawing a guessed tactic.</p>
         </div>
         <div className="live-source-label"><span className="live-dot" />Live FM26</div>
       </div>
@@ -29,7 +37,8 @@ export function TacticsScreen({ snapshot, onOpenPlayer }: { snapshot: LiveFootba
             <header><Cpu /><h2>Live tactic source</h2></header>
             <dl>
               <div><dt>Source</dt><dd>{snapshot.tacticSource === "live-memory" ? "Active FM26 tactic" : "None"}</dd></div>
-              <div><dt>Tactic object</dt><dd>{tacticObjectDetected ? "Detected" : "Not detected"}</dd></div>
+              <div><dt>Memory read</dt><dd>{tacticReadLabel}</dd></div>
+              <div><dt>Tactic object</dt><dd>{tacticObjectDetected ? "Detected by pointer scan" : "Not detected"}</dd></div>
               <div><dt>Formation</dt><dd>{snapshot.tactic?.formation ?? "Not validated"}</dd></div>
               <div><dt>FM26 enum</dt><dd>{snapshot.tactic?.formationEnum ?? "Not available"}</dd></div>
               <div><dt>Pitch layout</dt><dd>{snapshot.tactic?.layoutStatus === "exact-template" ? "Template mapped" : ready ? "Selected XI only" : "Not validated"}</dd></div>
@@ -51,7 +60,7 @@ export function TacticsScreen({ snapshot, onOpenPlayer }: { snapshot: LiveFootba
                     : "The active FM26 formation template and selected XI have passed memory validation. Role/duty fit remains disabled until the packed role codes validate."
                   : "The active FM26 formation code and selected XI are live. Exact pitch placement for this formation still needs template validation, so no role/duty fit is invented."
                 : objectDetected
-                  ? "GlassScout found FM26’s live tactic manager, but the selected-slot block did not validate for this read. No tactic or fit score is invented."
+                  ? "GlassScout found FM26's live tactic manager in memory, but the selected-slot block did not validate for this read. No tactic or fit score is invented."
                   : "The live tactic object was not available. Open FM26, load the save and select the active tactic."}
             </p>
           </section>

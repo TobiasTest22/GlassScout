@@ -47,6 +47,12 @@ export type LiveConnectorStatus = {
   failureStage?: string | null;
   lastSuccessfulRead?: string | null;
   windowsErrorCode?: number | null;
+  readPipeline?: Array<{
+    key: string;
+    label: string;
+    state: "passed" | "warning" | "blocked" | "pending";
+    detail: string;
+  }>;
   canWriteMemory: false;
   message: string;
   warnings: string[];
@@ -267,6 +273,7 @@ const desktopRequiredStatus: LiveConnectorStatus = {
   failureStage: null,
   lastSuccessfulRead: null,
   windowsErrorCode: null,
+  readPipeline: [],
   canWriteMemory: false,
   message: "GlassScout requires the installed Windows app to connect to the active FM26 game.",
   warnings: ["No live data is being simulated."],

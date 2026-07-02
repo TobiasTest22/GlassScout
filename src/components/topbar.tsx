@@ -13,6 +13,22 @@ function syncLabel(value: string | null) {
   return `Synced ${Math.max(1, Math.round(elapsed / 60_000))}m ago`;
 }
 
+function connectionLabel(snapshot: LiveFootballSnapshot) {
+  const status = snapshot.status;
+  if (status.state === "connected") return "FM26 live read";
+  if (status.processDetected) return "Read not ready";
+  return "Waiting for FM26";
+}
+
+function connectionDetail(snapshot: LiveFootballSnapshot) {
+  const status = snapshot.status;
+  if (status.state === "connected") {
+    return `${status.managedSquadPlayers} squad · ${status.databasePlayersIndexed} indexed`;
+  }
+  if (status.failureStage) return status.failureStage.replaceAll("_", " ");
+  return syncLabel(status.lastSync);
+}
+
 export function Topbar({
   search,
   onSearch,
@@ -80,9 +96,9 @@ export function Topbar({
       <div className="topbar-actions">
         <div className="sync-badge">
           <span className={connected ? "live-dot" : "neutral-dot"} />
-          <span>{connected ? "Live memory" : "Disconnected"}</span>
+          <span>{connectionLabel(snapshot)}</span>
           <i />
-          <span>{syncLabel(snapshot.status.lastSync)}</span>
+          <span>{connectionDetail(snapshot)}</span>
         </div>
         <Button variant="outline" size="icon" aria-label="Reload active save" onClick={onRefresh} disabled={checking}>
           <RefreshCw className={checking ? "spin" : undefined} aria-hidden="true" />

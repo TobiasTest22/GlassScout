@@ -17,6 +17,11 @@ const loadStageLabels: Record<string, string> = {
   ready: "Ready",
 };
 
+function readable(value: string | null | undefined) {
+  if (!value) return "None";
+  return value.replaceAll("_", " ").replaceAll("-", " ");
+}
+
 export function StartupScreen({
   onConnect,
   onEnter,
@@ -86,7 +91,12 @@ export function StartupScreen({
           <span><ShieldCheck />No simulated players</span>
         </div>
         {status && status.state !== "connected" ? (
-          <p className="load-failure" role="alert">{status.message}</p>
+          <div className="load-failure" role="alert">
+            <strong>{status.message}</strong>
+            <span>Failed stage: {readable(status.failureStage)}</span>
+            <span>Last successful read: {readable(status.lastSuccessfulRead)}</span>
+            <span>Memory access: {readable(status.memoryAccess)}</span>
+          </div>
         ) : null}
       </section>
     </main>

@@ -7,6 +7,18 @@ import { captureMappingEvidence, compareMappingEvidence, getMappingLabStatus, ty
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+function readable(value: string | null | undefined) {
+  if (!value) return "None";
+  return value.replaceAll("_", " ").replaceAll("-", " ");
+}
+
+function stageLabel(state: string) {
+  if (state === "passed") return "Passed";
+  if (state === "warning") return "Needs mapping";
+  if (state === "blocked") return "Blocked";
+  return "Pending";
+}
+
 export function SettingsScreen({
   snapshot,
   checking,
@@ -17,6 +29,7 @@ export function SettingsScreen({
   onRefresh: () => Promise<unknown>;
 }) {
   const status = snapshot.status;
+  const pipeline = status.readPipeline ?? [];
   const [mappingLab, setMappingLab] = useState<MappingLabStatus | null>(null);
   const [mappingTarget, setMappingTarget] = useState("");
   const [mappingLabel, setMappingLabel] = useState("");
@@ -52,6 +65,35 @@ export function SettingsScreen({
         <article><LockKeyhole /><div><strong>Memory safety</strong><span>Query and read access only. GlassScout cannot write to FM26.</span></div><b>{status.memoryAccess.replaceAll("_", " ")}</b></article>
       </section>
 
+      <section className="read-pipeline-panel">
+        <header>
+          <div>
+            <span className="section-kicker">Backend read pipeline</span>
+            <h2>What GlassScout actually read from FM26</h2>
+            <p>These stages come from the native connector. They separate live memory reads from still-unmapped fields and local enrichment.</p>
+          </div>
+          <Button variant="outline" onClick={onRefresh} disabled={checking}>
+            <RefreshCw data-icon="inline-start" className={checking ? "spin" : undefined} />
+            Re-run read
+          </Button>
+        </header>
+        <div className="read-pipeline-grid">
+          {pipeline.length ? pipeline.map((stage) => (
+            <article key={stage.key} data-state={stage.state}>
+              <span>{stageLabel(stage.state)}</span>
+              <strong>{stage.label}</strong>
+              <p>{stage.detail}</p>
+            </article>
+          )) : (
+            <article data-state="pending">
+              <span>Pending</span>
+              <strong>No pipeline yet</strong>
+              <p>Run the active-save read to collect backend stage diagnostics.</p>
+            </article>
+          )}
+        </div>
+      </section>
+
       <details className="advanced-diagnostics">
         <summary><span><Cpu />Advanced diagnostics</span><ChevronDown /></summary>
         <p>Technical connection and visibility-gate details for troubleshooting supported FM26 builds.</p>
@@ -83,8 +125,8 @@ export function SettingsScreen({
           <div><dt>Live memory tactic read</dt><dd>{status.liveMemoryTacticRead ?? "disabled"}</dd></div>
           <div><dt>Tactic manager</dt><dd>{status.tacticManagerPointer ?? "Unavailable"}</dd></div>
           <div><dt>Tactic source</dt><dd>{snapshot.tacticSource.replaceAll("_", " ")}</dd></div>
-          <div><dt>Last successful read</dt><dd>{status.lastSuccessfulRead?.replaceAll("_", " ") ?? "None"}</dd></div>
-          <div><dt>Failure stage</dt><dd>{status.failureStage?.replaceAll("_", " ") ?? "None"}</dd></div>
+          <div><dt>Last successful read</dt><dd>{readable(status.lastSuccessfulRead)}</dd></div>
+          <div><dt>Failure stage</dt><dd>{readable(status.failureStage)}</dd></div>
           <div><dt>Windows error</dt><dd>{status.windowsErrorCode ?? "None"}</dd></div>
           <div className="diagnostic-hash"><dt>Executable SHA-256</dt><dd>{status.executableSha256 ?? "Unavailable"}</dd></div>
         </dl>
