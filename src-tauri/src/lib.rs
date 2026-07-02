@@ -2,7 +2,6 @@
 
 mod connector;
 mod player_face;
-mod tactic_file;
 mod visibility;
 
 use tauri_plugin_sql::{Migration, MigrationKind};
@@ -17,7 +16,6 @@ pub fn run() {
     }];
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:glassscout.db", migrations)
@@ -28,9 +26,8 @@ pub fn run() {
             connector::connector_snapshot,
             connector::load_active_save,
             connector::search_indexed_players,
+            player_face::club_logo_data,
             player_face::player_face_data,
-            tactic_file::import_tactic_file,
-            tactic_file::tactic_file_status,
             visibility::filter_observations
         ])
         .run(tauri::generate_context!())

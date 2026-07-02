@@ -38,6 +38,6 @@ Own-squad records are treated as fully known because FM exposes their player inf
 
 Unknown fields must remain `null` and display as **Unknown**.
 
-## FMF tactic files
+## Active tactic
 
-The FM26 `.fmf` archive and its Zstandard index are detected and decoded safely. Archive entries such as `.tac`, `.img` and `details.aom` are identified. The current `.tac` payload is encrypted in the AFE container; formation, roles, duties and instructions therefore remain unavailable and are never guessed.
+The native `TACTICS_MANAGER` and per-save tactic creator object are detected in the active FM26 process using read-only memory access. The packed formation, in-possession/out-of-possession roles, duties and instruction structures are not yet validated, so tactic output remains blocked rather than guessed.

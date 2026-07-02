@@ -40,7 +40,8 @@ export type LiveConnectorStatus = {
   savePointer?: string | null;
   managedClubPointer?: string | null;
   playerCollectionPointer?: string | null;
-  liveMemoryTacticRead?: "disabled";
+  liveMemoryTacticRead?: "not_run" | "object_not_found" | "object_detected_unmapped" | "ready";
+  tacticManagerPointer?: string | null;
   failureStage?: string | null;
   lastSuccessfulRead?: string | null;
   windowsErrorCode?: number | null;
@@ -96,6 +97,27 @@ export type LivePlayer = {
   roleReasoning?: string[];
   riskLevel?: "low" | "medium" | "high" | "unknown";
   marketValueAmount?: number | null;
+  personality?: string | null;
+  condition?: string | null;
+  recommendation?: RecommendationEvidence;
+  knowledge?: Record<string, KnowledgeField<unknown>>;
+};
+
+export type FieldVisibility = "known" | "estimated" | "range" | "unknown";
+
+export type KnowledgeField<T> = {
+  value: T | null;
+  visibility: FieldVisibility;
+  source: "own-squad" | "scout-report" | "player-profile" | "data-hub" | "memory-raw";
+  confidence: number;
+  lastValidated: string | null;
+};
+
+export type RecommendationEvidence = {
+  minimum: number | null;
+  maximum: number | null;
+  completeness: number;
+  label: string;
 };
 
 export type LiveClub = {
@@ -120,32 +142,7 @@ export type LiveTactic = {
   playerInstructionsReadable: boolean;
 };
 
-export type TacticSource = "none" | "fmf-file" | "live-memory";
-
-export type TacticParserStatus =
-  | "not_imported"
-  | "imported_unparsed"
-  | "partially_parsed"
-  | "parsed"
-  | "unsupported_format"
-  | "invalid_file";
-
-export type TacticFileResult = {
-  success: boolean;
-  fileName: string | null;
-  fileSize: number | null;
-  importedAt: string | null;
-  parserStatus: TacticParserStatus;
-  parsedFormation: string | null;
-  parsedRoles: string[];
-  parsedDuties: string[];
-  detectedFormat: string | null;
-  archiveEntries?: string[];
-  compressed: boolean | null;
-  encoded: boolean | null;
-  warnings: string[];
-  errors: string[];
-};
+export type TacticSource = "none" | "live-memory";
 
 export type LiveFootballSnapshot = {
   status: LiveConnectorStatus;
@@ -156,14 +153,6 @@ export type LiveFootballSnapshot = {
   players: LivePlayer[];
   tactic: LiveTactic | null;
   tacticSource: TacticSource;
-  tacticFileStatus: TacticParserStatus;
-  tacticFileName: string | null;
-  tacticFileWarnings: string[];
-  tacticFileSize?: number | null;
-  tacticImportedAt?: string | null;
-  tacticFileErrors?: string[];
-  tacticDetectedFormat?: string | null;
-  tacticArchiveEntries?: string[];
   dataError: string | null;
   dataSource?: "none" | "live-memory";
   dataWarnings?: string[];
@@ -215,7 +204,8 @@ const desktopRequiredStatus: LiveConnectorStatus = {
   savePointer: null,
   managedClubPointer: null,
   playerCollectionPointer: null,
-  liveMemoryTacticRead: "disabled",
+  liveMemoryTacticRead: "not_run",
+  tacticManagerPointer: null,
   failureStage: null,
   lastSuccessfulRead: null,
   windowsErrorCode: null,
@@ -223,50 +213,6 @@ const desktopRequiredStatus: LiveConnectorStatus = {
   message: "GlassScout requires the installed Windows app to connect to the active FM26 game.",
   warnings: ["No live data is being simulated."],
 };
-
-const notImportedTactic: TacticFileResult = {
-  success: false,
-  fileName: null,
-  fileSize: null,
-  importedAt: null,
-  parserStatus: "not_imported",
-  parsedFormation: null,
-  parsedRoles: [],
-  parsedDuties: [],
-  detectedFormat: null,
-  compressed: null,
-  encoded: null,
-  warnings: [],
-  errors: [],
-};
-
-export function mergeTacticFile(
-  snapshot: LiveFootballSnapshot,
-  file: TacticFileResult,
-): LiveFootballSnapshot {
-  const hasParsedTactic = (
-    file.parserStatus === "parsed" || file.parserStatus === "partially_parsed"
-  ) && file.parsedFormation != null;
-  return {
-    ...snapshot,
-    tactic: hasParsedTactic ? {
-      name: file.fileName,
-      formation: file.parsedFormation ?? "Unavailable",
-      slots: [],
-      teamInstructions: [],
-      playerInstructionsReadable: false,
-    } : null,
-    tacticSource: file.success ? "fmf-file" : "none",
-    tacticFileStatus: file.parserStatus,
-    tacticFileName: file.fileName,
-    tacticFileWarnings: file.warnings,
-    tacticFileSize: file.fileSize,
-    tacticImportedAt: file.importedAt,
-    tacticFileErrors: file.errors,
-    tacticDetectedFormat: file.detectedFormat,
-    tacticArchiveEntries: file.archiveEntries ?? [],
-  };
-}
 
 export const fm26LiveAdapter: FootballDataAdapter = {
   kind: "fm26-live",
@@ -298,9 +244,6 @@ export const fm26LiveAdapter: FootballDataAdapter = {
         players: [],
         tactic: null,
         tacticSource: "none",
-        tacticFileStatus: "not_imported",
-        tacticFileName: null,
-        tacticFileWarnings: [],
         dataError: desktopRequiredStatus.message,
         dataSource: "none",
         dataWarnings: desktopRequiredStatus.warnings,
@@ -309,11 +252,7 @@ export const fm26LiveAdapter: FootballDataAdapter = {
 
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      const [snapshot, tacticFile] = await Promise.all([
-        invoke<LiveFootballSnapshot>("load_active_save"),
-        invoke<TacticFileResult>("tactic_file_status").catch(() => notImportedTactic),
-      ]);
-      return mergeTacticFile(snapshot, tacticFile);
+      return await invoke<LiveFootballSnapshot>("load_active_save");
     } catch (error) {
       const message = error instanceof Error ? error.message : "The desktop connector could not be reached.";
       return {
@@ -325,9 +264,6 @@ export const fm26LiveAdapter: FootballDataAdapter = {
         players: [],
         tactic: null,
         tacticSource: "none",
-        tacticFileStatus: "not_imported",
-        tacticFileName: null,
-        tacticFileWarnings: [],
         dataError: message,
         dataSource: "none",
         dataWarnings: [message],
@@ -336,28 +272,20 @@ export const fm26LiveAdapter: FootballDataAdapter = {
   },
 };
 
-export async function chooseAndImportFmfTactic(): Promise<TacticFileResult | null> {
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
-    return {
-      ...notImportedTactic,
-      parserStatus: "invalid_file",
-      errors: ["FMF tactic import is available only in the installed Windows app."],
-    };
-  }
-  const [{ open }, { invoke }] = await Promise.all([
-    import("@tauri-apps/plugin-dialog"),
-    import("@tauri-apps/api/core"),
-  ]);
-  const selected = await open({
-    title: "Choose an FM26 tactic",
-    multiple: false,
-    directory: false,
-    filters: [{ name: "Football Manager tactic", extensions: ["fmf"] }],
-  });
-  if (selected == null || Array.isArray(selected)) {
-    return null;
-  }
-  return await invoke<TacticFileResult>("import_tactic_file", { path: selected });
+export type IndexedPlayerSearchResult = {
+  id: string;
+  name: string;
+  positions: string[];
+  managedSquad: boolean;
+  visibility: "known" | "unknown";
+  scoutKnowledge: "fully_known" | "unknown";
+  scoutConfidence: number;
+};
+
+export async function searchIndexedPlayers(query: string): Promise<IndexedPlayerSearchResult[]> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<IndexedPlayerSearchResult[]>("search_indexed_players", { query });
 }
 
 export const realLifeAdapter: FutureRealLifeAdapter = {

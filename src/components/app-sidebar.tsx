@@ -20,6 +20,7 @@ export type Screen =
   | "Scout Room"
   | "Shortlist"
   | "Player Profile"
+  | "Club Profile"
   | "Settings";
 
 const navigation = [

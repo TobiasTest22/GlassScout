@@ -52,9 +52,8 @@ export function SettingsScreen({
           <div><dt>Fully scouted players</dt><dd>{status.fullyScoutedPlayers}</dd></div>
           <div><dt>Partial scout reports</dt><dd>{status.partialScoutReports}</dd></div>
           <div><dt>Live memory tactic read</dt><dd>{status.liveMemoryTacticRead ?? "disabled"}</dd></div>
+          <div><dt>Tactic manager</dt><dd>{status.tacticManagerPointer ?? "Unavailable"}</dd></div>
           <div><dt>Tactic source</dt><dd>{snapshot.tacticSource.replaceAll("_", " ")}</dd></div>
-          <div><dt>FMF parser status</dt><dd>{snapshot.tacticFileStatus.replaceAll("_", " ")}</dd></div>
-          <div><dt>Imported FMF</dt><dd>{snapshot.tacticFileName ?? "None"}</dd></div>
           <div><dt>Last successful read</dt><dd>{status.lastSuccessfulRead?.replaceAll("_", " ") ?? "None"}</dd></div>
           <div><dt>Failure stage</dt><dd>{status.failureStage?.replaceAll("_", " ") ?? "None"}</dd></div>
           <div><dt>Windows error</dt><dd>{status.windowsErrorCode ?? "None"}</dd></div>

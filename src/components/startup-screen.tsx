@@ -24,14 +24,10 @@ export function StartupScreen({
   onConnect: () => Promise<LiveConnectorStatus>;
   onEnter: (status: LiveConnectorStatus) => void;
 }) {
-  const [desktopRuntime, setDesktopRuntime] = useState(false);
+  const [desktopRuntime] = useState(() => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<LiveConnectorStatus | null>(null);
   const [loadStage, setLoadStage] = useState("detecting_fm26");
-
-  useEffect(() => {
-    setDesktopRuntime("__TAURI_INTERNALS__" in window);
-  }, []);
 
   useEffect(() => {
     if (!desktopRuntime) return;

@@ -47,7 +47,8 @@
         "playerCurrentDateOffset": 512,
         "personNationalityOffset": 104,
         "nationNameOffset": 24,
-        "personBirthDateOffset": 136
+        "personBirthDateOffset": 136,
+        "tacticsManagerVtableRva": 74061456
       }
     }
   ]

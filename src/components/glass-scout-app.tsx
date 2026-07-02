@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AppSidebar, type Screen } from "@/components/app-sidebar";
 import { Topbar } from "@/components/topbar";
@@ -12,11 +12,12 @@ import { FavoritedPlayersScreen } from "@/components/favorited-players-screen";
 import { PlayerProfileScreen } from "@/components/player-profile-screen";
 import { StartupScreen } from "@/components/startup-screen";
 import { SettingsScreen } from "@/components/settings-screen";
+import { ClubProfileScreen } from "@/components/club-profile-screen";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
-  chooseAndImportFmfTactic,
   fm26LiveAdapter,
-  mergeTacticFile,
+  searchIndexedPlayers,
+  type IndexedPlayerSearchResult,
   type LiveConnectorStatus,
   type LiveFootballSnapshot,
 } from "@/domain/adapters";
@@ -56,7 +57,8 @@ const initialStatus: LiveConnectorStatus = {
   savePointer: null,
   managedClubPointer: null,
   playerCollectionPointer: null,
-  liveMemoryTacticRead: "disabled",
+  liveMemoryTacticRead: "not_run",
+  tacticManagerPointer: null,
   failureStage: null,
   lastSuccessfulRead: null,
   windowsErrorCode: null,
@@ -74,9 +76,6 @@ const initialSnapshot: LiveFootballSnapshot = {
   players: [],
   tactic: null,
   tacticSource: "none",
-  tacticFileStatus: "not_imported",
-  tacticFileName: null,
-  tacticFileWarnings: [],
   dataError: "Diagnostics have not run yet.",
   dataSource: "none",
   dataWarnings: [],
@@ -88,6 +87,8 @@ export function GlassScoutApp() {
   const [search, setSearch] = useState("");
   const [snapshot, setSnapshot] = useState<LiveFootballSnapshot>(initialSnapshot);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
+  const [selectedClubId, setSelectedClubId] = useState<string | null>(null);
+  const [globalIndexed, setGlobalIndexed] = useState<IndexedPlayerSearchResult[]>([]);
   const [favorites, setFavorites] = useState<FavoriteRecord[]>(() => {
     if (typeof window === "undefined") return [];
     const stored = window.localStorage.getItem("glassscout-favorites-v1");
@@ -100,11 +101,17 @@ export function GlassScoutApp() {
     }
   });
   const [checking, setChecking] = useState(false);
-  const [importingTactic, setImportingTactic] = useState(false);
 
   useEffect(() => {
     window.localStorage.setItem("glassscout-favorites-v1", JSON.stringify(favorites));
   }, [favorites]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!search.trim()) { setGlobalIndexed([]); return; }
+      searchIndexedPlayers(search).then((items) => setGlobalIndexed(items.slice(0, 8))).catch(() => setGlobalIndexed([]));
+    }, search.trim() ? 160 : 0);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const checkConnection = useCallback(async () => {
     setChecking(true);
@@ -123,21 +130,15 @@ export function GlassScoutApp() {
 
   const togglePlayerFavorite = (playerId: string) => setFavorites((current) => toggleFavorite(current, playerId));
   const updatePlayerNote = (playerId: string, note: string) => setFavorites((current) => updateFavoriteNote(current, playerId, note));
-  const importTactic = useCallback(async () => {
-    setImportingTactic(true);
-    try {
-      const result = await chooseAndImportFmfTactic();
-      if (result) {
-        setSnapshot((current) => mergeTacticFile(current, result));
-      }
-    } finally {
-      setImportingTactic(false);
-    }
-  }, []);
   const openPlayer = (playerId: string) => {
     setSelectedPlayerId(playerId);
     setScreen("Player Profile");
   };
+  const openClub = (clubId: string) => {
+    setSelectedClubId(clubId);
+    setScreen("Club Profile");
+  };
+  const globalClubs = useMemo(() => search.trim() ? snapshot.clubs.filter((club) => club.name.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 4) : [], [search, snapshot.clubs]);
 
   if (mode === null) {
     return (
@@ -150,7 +151,7 @@ export function GlassScoutApp() {
   const content =
     screen === "Dashboard" ? <DashboardScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onNavigate={setScreen} /> :
     screen === "Squad" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onOpenPlayer={openPlayer} /> :
-    screen === "Tactical Board" ? <TacticsScreen snapshot={snapshot} importing={importingTactic} onImportTactic={importTactic} /> :
+    screen === "Tactical Board" ? <TacticsScreen snapshot={snapshot} /> :
     screen === "Scout Room" ? <ScoutRoomScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
     screen === "Shortlist" ? <FavoritedPlayersScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onUpdateNote={updatePlayerNote} /> :
     screen === "Player Profile" ? (
@@ -160,8 +161,9 @@ export function GlassScoutApp() {
         favorite={selectedPlayerId ? favorites.some((record) => record.playerId === selectedPlayerId) : false}
         onToggleFavorite={() => selectedPlayerId && togglePlayerFavorite(selectedPlayerId)}
         onBack={() => setScreen("Scout Room")}
+        onOpenClub={openClub}
       />
-    ) :
+    ) : screen === "Club Profile" ? <ClubProfileScreen clubId={selectedClubId} snapshot={snapshot} onBack={() => setScreen("Scout Room")} onOpenPlayer={openPlayer} /> :
     <SettingsScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} />;
 
   return (
@@ -178,9 +180,11 @@ export function GlassScoutApp() {
             onRefresh={checkConnection}
           />
           {search ? (
-            <motion.div className="search-result" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
-              Searching the current dataset for <strong>“{search}”</strong>
-              <button onClick={() => setSearch("")}>Clear</button>
+            <motion.div className="global-search-results" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
+              <header><strong>Search results</strong><button onClick={() => setSearch("")}>Clear</button></header>
+              {globalClubs.map((club) => <button key={club.id} onClick={() => { openClub(club.id); setSearch(""); }}><span>Team</span><strong>{club.name}</strong><small>{club.league ?? "Competition unknown"}</small></button>)}
+              {globalIndexed.map((result) => <button key={result.id} onClick={() => { if (snapshot.players.some((player) => player.id === result.id)) openPlayer(result.id); else setScreen("Scout Room"); setSearch(""); }}><span>Player</span><strong>{result.name}</strong><small>{result.positions.join(" / ") || "Position unknown"} · {result.visibility}</small></button>)}
+              {!globalClubs.length && !globalIndexed.length ? <p>No indexed player or mapped team matches “{search}”.</p> : null}
             </motion.div>
           ) : null}
           <AnimatePresence mode="wait">

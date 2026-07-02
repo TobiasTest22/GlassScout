@@ -14,22 +14,20 @@ type PlayerFaceResult = {
 
 const faceCache = new Map<string, string | null>();
 
-export function PlayerFace({
-  playerId,
-  name,
-  size = "md",
-}: {
+export function PlayerFace({ playerId, name, size = "md", highResolution = false }: {
   playerId: string;
   name: string;
   size?: "sm" | "md" | "lg";
+  highResolution?: boolean;
 }) {
-  const cacheKey = `${playerId}:${size === "sm" ? "icon" : "portrait"}`;
+  const useIcon = size === "sm" && !highResolution;
+  const cacheKey = `${playerId}:${useIcon ? "icon" : "portrait"}`;
   const [source, setSource] = useState<string | null | undefined>(() => faceCache.get(cacheKey));
 
   useEffect(() => {
     if (faceCache.has(cacheKey) || !("__TAURI_INTERNALS__" in window)) return;
     let active = true;
-    invoke<PlayerFaceResult>("player_face_data", { playerId, icon: size === "sm" })
+    invoke<PlayerFaceResult>("player_face_data", { playerId, icon: useIcon })
       .then((result) => {
         const next = result.found ? result.dataUrl : null;
         faceCache.set(cacheKey, next);
@@ -39,10 +37,8 @@ export function PlayerFace({
         faceCache.set(cacheKey, null);
         if (active) setSource(null);
       });
-    return () => {
-      active = false;
-    };
-  }, [cacheKey, playerId, size]);
+    return () => { active = false; };
+  }, [cacheKey, playerId, useIcon]);
 
   return (
     <span className={cn("player-face", `player-face-${size}`)} title={`${name} · FM ID ${playerId}`}>

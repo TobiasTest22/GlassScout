@@ -89,10 +89,10 @@ export function DashboardScreen({
     {
       icon: snapshot.tactic ? ClipboardCheck : FileWarning,
       title: snapshot.tactic ? `${snapshot.tactic.formation} tactic ready` : "Tactical decoding needs attention",
-      detail: snapshot.tacticFileName
-        ? `${snapshot.tacticFileName} is stored safely, but this FMF format is not decoded.`
-        : "Import the active FMF tactic to enable role and tactical-fit analysis.",
-      action: snapshot.tactic ? "Open board" : "Import tactic",
+      detail: snapshot.status.liveMemoryTacticRead === "object_detected_unmapped"
+        ? "The active live tactic object is detected; its packed formation and phase-role layout is not yet validated."
+        : "Open FM26 and select the active tactic so GlassScout can inspect the live object.",
+      action: "Open board",
       screen: "Tactical Board" as Screen,
     },
     {

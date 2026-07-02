@@ -111,6 +111,7 @@ pub struct ConnectorStatus {
     managed_club_pointer: Option<String>,
     player_collection_pointer: Option<String>,
     live_memory_tactic_read: &'static str,
+    tactic_manager_pointer: Option<String>,
     failure_stage: Option<String>,
     last_successful_read: Option<String>,
     windows_error_code: Option<u32>,
@@ -129,9 +130,6 @@ pub struct ConnectorSnapshot {
     players: Vec<Value>,
     tactic: Option<Value>,
     tactic_source: &'static str,
-    tactic_file_status: &'static str,
-    tactic_file_name: Option<String>,
-    tactic_file_warnings: Vec<String>,
     data_error: Option<String>,
     data_source: &'static str,
     data_warnings: Vec<String>,
@@ -203,6 +201,7 @@ struct MapConstants {
     person_nationality_offset: u64,
     nation_name_offset: u64,
     person_birth_date_offset: u64,
+    tactics_manager_vtable_rva: u64,
 }
 
 #[derive(Default)]
@@ -225,6 +224,7 @@ struct LiveData {
     database_index_status: &'static str,
     database_scope: &'static str,
     warnings: Vec<String>,
+    tactic_manager_pointer: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -288,9 +288,6 @@ pub fn load_active_save(app: tauri::AppHandle) -> ConnectorSnapshot {
 #[tauri::command]
 pub fn search_indexed_players(query: String) -> Vec<Value> {
     let normalized = query.trim().to_lowercase();
-    if normalized.is_empty() {
-        return Vec::new();
-    }
     let Some(index) = PLAYER_DATABASE_INDEX.get() else {
         return Vec::new();
     };
@@ -298,28 +295,37 @@ pub fn search_indexed_players(query: String) -> Vec<Value> {
         return Vec::new();
     };
     let _identity = (index.process_id, index.save_pointer);
-    index
+    let mut results: Vec<Value> = index
         .records
         .values()
-        .filter(|record| record.visibility_safe)
         .filter(|record| {
-            record.name.to_lowercase().contains(&normalized)
+            normalized.is_empty()
+                || record.name.to_lowercase().contains(&normalized)
                 || record
                     .positions
                     .iter()
                     .any(|position| position.to_lowercase().contains(&normalized))
         })
-        .take(100)
         .map(|record| {
             json!({
                 "id": record.id,
                 "name": record.name,
                 "positions": record.positions,
                 "managedSquad": record.managed_squad,
-                "visibility": "club-visible"
+                "visibility": if record.visibility_safe { "known" } else { "unknown" },
+                "scoutKnowledge": if record.visibility_safe { "fully_known" } else { "unknown" },
+                "scoutConfidence": if record.visibility_safe { 100 } else { 0 }
             })
         })
-        .collect()
+        .collect();
+    results.sort_by(|left, right| {
+        left["name"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(right["name"].as_str().unwrap_or_default())
+    });
+    results.truncate(500);
+    results
 }
 
 fn empty_status() -> ConnectorStatus {
@@ -358,7 +364,8 @@ fn empty_status() -> ConnectorStatus {
         save_pointer: None,
         managed_club_pointer: None,
         player_collection_pointer: None,
-        live_memory_tactic_read: "disabled",
+        live_memory_tactic_read: "not_run",
+        tactic_manager_pointer: None,
         failure_stage: None,
         last_successful_read: None,
         windows_error_code: None,
@@ -377,9 +384,6 @@ fn empty_snapshot(status: ConnectorStatus, error: String) -> ConnectorSnapshot {
         players: Vec::new(),
         tactic: None,
         tactic_source: "none",
-        tactic_file_status: "not_imported",
-        tactic_file_name: None,
-        tactic_file_warnings: Vec::new(),
         data_error: Some(error),
         data_source: "none",
         data_warnings: Vec::new(),
@@ -511,6 +515,12 @@ fn collect_snapshot(
             status.database_scope = data.database_scope;
             status.clubs_loaded = data.clubs.len() as u32;
             status.pointer_validation = "passed";
+            status.live_memory_tactic_read = if data.tactic_manager_pointer.is_some() {
+                "object_detected_unmapped"
+            } else {
+                "object_not_found"
+            };
+            status.tactic_manager_pointer = data.tactic_manager_pointer.map(hex_address);
             status.last_sync = Some(unix_milliseconds());
             status.message = format!(
                 "Connected to {} with {} live squad players and {} indexed player records.",
@@ -532,9 +542,6 @@ fn collect_snapshot(
                 players: data.players,
                 tactic: None,
                 tactic_source: "none",
-                tactic_file_status: "not_imported",
-                tactic_file_name: None,
-                tactic_file_warnings: Vec::new(),
                 data_error: None,
                 data_source: "live-memory",
                 data_warnings: data.warnings,
@@ -875,6 +882,22 @@ fn extract_live_data(
             .as_deref()
             .and_then(|position| visible_ability_score(position, &visible_attributes));
         let (strengths, weaknesses) = attribute_evidence(&visible_attributes);
+        let validated_at = unix_milliseconds();
+        let attribute_knowledge: serde_json::Map<String, Value> = visible_attributes
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.clone(),
+                    json!({
+                        "value": value,
+                        "visibility": "known",
+                        "source": "own-squad",
+                        "confidence": 100,
+                        "lastValidated": validated_at
+                    }),
+                )
+            })
+            .collect();
         let player_id = uid.to_string();
         managed_player_ids.insert(player_id.clone());
         managed_index_records.push(IndexedPlayerRecord {
@@ -886,13 +909,13 @@ fn extract_live_data(
         });
         players.push(json!({
             "id": player_id,
-            "name": name,
+            "name": name.clone(),
             "_season": season,
             "age": age,
             "dateOfBirth": date_of_birth,
-            "nationality": nationality,
+            "nationality": nationality.clone(),
             "secondNationality": null,
-            "positions": positions,
+            "positions": positions.clone(),
             "bestRole": best_role,
             "currentAbility": null,
             "potentialAbility": null,
@@ -932,6 +955,26 @@ fn extract_live_data(
             "roleReasoning": ["Role evidence uses only the managed player's visible FM26 attributes and positional familiarity."],
             "riskLevel": "unknown",
             "marketValueAmount": null
+            ,"personality": null
+            ,"condition": null
+            ,"recommendation": {
+                "minimum": ability_score,
+                "maximum": ability_score,
+                "completeness": 100,
+                "label": if ability_score.is_some() { "full visible-attribute evidence" } else { "not enough evidence" }
+            }
+            ,"knowledge": {
+                "name": { "value": name, "visibility": "known", "source": "own-squad", "confidence": 100, "lastValidated": validated_at },
+                "age": { "value": age, "visibility": "known", "source": "own-squad", "confidence": 100, "lastValidated": validated_at },
+                "nationality": { "value": nationality, "visibility": "known", "source": "own-squad", "confidence": 100, "lastValidated": validated_at },
+                "positions": { "value": positions, "visibility": "known", "source": "own-squad", "confidence": 100, "lastValidated": validated_at },
+                "attributes": attribute_knowledge,
+                "form": { "value": null, "visibility": "unknown", "source": "memory-raw", "confidence": 0, "lastValidated": null },
+                "contract": { "value": null, "visibility": "unknown", "source": "memory-raw", "confidence": 0, "lastValidated": null },
+                "wage": { "value": null, "visibility": "unknown", "source": "memory-raw", "confidence": 0, "lastValidated": null },
+                "value": { "value": null, "visibility": "unknown", "source": "memory-raw", "confidence": 0, "lastValidated": null },
+                "interest": { "value": null, "visibility": "unknown", "source": "memory-raw", "confidence": 0, "lastValidated": null }
+            }
         }));
     }
     diagnostics.last_successful_read = Some("extract_managed_squad".to_string());
@@ -941,6 +984,7 @@ fn extract_live_data(
         background_players_indexed,
         database_index_status,
         database_scope,
+        tactic_manager_pointer,
     ) = if include_database_index {
         if let Some(progress) = progress {
             progress("indexing_player_database");
@@ -957,6 +1001,7 @@ fn extract_live_data(
             process_id,
             diagnostics.save_pointer.unwrap_or_default(),
             seed_vtable,
+            module,
             &managed_player_ids,
             managed_index_records,
         ) {
@@ -970,9 +1015,10 @@ fn extract_live_data(
                     indexed.background,
                     "ready",
                     "full-save-index",
+                    indexed.tactic_manager_pointer,
                 )
             }
-            Err(_) => (player_count as u32, 0, "partial", "managed-squad"),
+            Err(_) => (player_count as u32, 0, "partial", "managed-squad", None),
         }
     } else {
         store_player_index(
@@ -980,7 +1026,7 @@ fn extract_live_data(
             diagnostics.save_pointer.unwrap_or_default(),
             managed_index_records,
         );
-        (player_count as u32, 0, "not_run", "managed-squad")
+        (player_count as u32, 0, "not_run", "managed-squad", None)
     };
 
     let season = players
@@ -997,7 +1043,7 @@ fn extract_live_data(
         "Managed-squad IDs, names, dates of birth, ages, nationality, positions, preferred foot and visible attributes are validated for this FM26 build. Hidden CA/PA is never read or scored.".to_string(),
         "Form, match ratings, contract, wage, valuation, fitness and squad-status relationships are not yet validated for this build and remain Unknown.".to_string(),
         "Own-squad players are fully known. Wider-save records remain hidden until FM26 scout-report visibility, ranges and confidence are validated.".to_string(),
-        "Live-memory tactic reading is disabled. Tactic Evaluation uses only a user-selected local FMF file.".to_string(),
+        "The live FM26 tactic manager is detected with read-only access. Packed formation, phase-role and instruction layouts are not yet validated, so no tactic is guessed.".to_string(),
         "The FM26 shortlist collection is not mapped safely. GlassScout Favorites remains a local list resolved against live players.".to_string(),
     ];
     if include_database_index && database_index_status == "ready" {
@@ -1027,6 +1073,7 @@ fn extract_live_data(
         database_index_status,
         database_scope,
         warnings,
+        tactic_manager_pointer,
     })
 }
 
@@ -1034,6 +1081,7 @@ fn extract_live_data(
 struct IndexSummary {
     total: u32,
     background: u32,
+    tactic_manager_pointer: Option<u64>,
 }
 
 #[cfg(target_os = "windows")]
@@ -1059,6 +1107,7 @@ fn index_full_player_database(
     process_id: u32,
     save_pointer: u64,
     player_vtable: u64,
+    module: ModuleInfo,
     managed_player_ids: &HashSet<String>,
     managed_records: Vec<IndexedPlayerRecord>,
 ) -> Result<IndexSummary, ExtractionFailure> {
@@ -1066,7 +1115,14 @@ fn index_full_player_database(
         .into_iter()
         .map(|record| (record.id.clone(), record))
         .collect();
-    let candidate_addresses = reader.scan_private_memory_for_pointer(player_vtable)?;
+    let tactics_manager_vtable = module.base + profile.constants.tactics_manager_vtable_rva;
+    let mut object_hits =
+        reader.scan_private_memory_for_pointers(&[player_vtable, tactics_manager_vtable])?;
+    let candidate_addresses = object_hits.remove(&player_vtable).unwrap_or_default();
+    let tactic_manager_hits = object_hits
+        .remove(&tactics_manager_vtable)
+        .unwrap_or_default();
+    let tactic_manager_pointer = (tactic_manager_hits.len() == 1).then_some(tactic_manager_hits[0]);
 
     for address in candidate_addresses {
         if records.len() >= 250_000 {
@@ -1103,7 +1159,11 @@ fn index_full_player_database(
             records,
         };
     }
-    Ok(IndexSummary { total, background })
+    Ok(IndexSummary {
+        total,
+        background,
+        tactic_manager_pointer,
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -1748,10 +1808,10 @@ impl ProcessReader {
         Ok(hits)
     }
 
-    fn scan_private_memory_for_pointer(
+    fn scan_private_memory_for_pointers(
         &mut self,
-        pointer: u64,
-    ) -> Result<Vec<u64>, ExtractionFailure> {
+        pointers: &[u64],
+    ) -> Result<HashMap<u64, Vec<u64>>, ExtractionFailure> {
         const MEM_COMMIT: u32 = 0x1000;
         const MEM_PRIVATE: u32 = 0x20000;
         const PAGE_NOACCESS: u32 = 0x01;
@@ -1800,8 +1860,16 @@ impl ProcessReader {
             ));
         }
 
-        let needle = pointer.to_le_bytes();
-        let mut hits = Vec::new();
+        let needles: Vec<(u64, [u8; 8])> = pointers
+            .iter()
+            .copied()
+            .map(|pointer| (pointer, pointer.to_le_bytes()))
+            .collect();
+        let mut hits: HashMap<u64, Vec<u64>> = pointers
+            .iter()
+            .copied()
+            .map(|pointer| (pointer, Vec::new()))
+            .collect();
         for region in regions {
             let mut offset = 0_usize;
             while offset < region.size {
@@ -1813,9 +1881,13 @@ impl ProcessReader {
                 let base = region.base + offset as u64;
                 let first_aligned = ((8 - (base as usize & 7)) & 7).min(bytes.len());
                 let mut position = first_aligned;
-                while position + needle.len() <= bytes.len() {
-                    if bytes[position..position + needle.len()] == needle {
-                        hits.push(base + position as u64);
+                while position + 8 <= bytes.len() {
+                    for (pointer, needle) in &needles {
+                        if bytes[position..position + 8] == *needle {
+                            hits.entry(*pointer)
+                                .or_default()
+                                .push(base + position as u64);
+                        }
                     }
                     position += 8;
                 }
@@ -1989,7 +2061,7 @@ mod tests {
         assert_eq!(snapshot.players.len(), 38);
         assert!(snapshot.tactic.is_none());
         assert_eq!(snapshot.tactic_source, "none");
-        assert_eq!(snapshot.status.live_memory_tactic_read, "disabled");
+        assert_eq!(snapshot.status.live_memory_tactic_read, "object_not_found");
         for player in &snapshot.players {
             assert!(player["currentAbility"].is_null());
             assert!(player["potentialAbility"].is_null());
@@ -2014,7 +2086,7 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn full_save_index_keeps_unvalidated_background_players_hidden() {
+    fn full_save_index_exposes_identity_only_background_search_records() {
         if find_fm26_process().is_none() {
             return;
         }
@@ -2029,13 +2101,18 @@ mod tests {
         assert!(snapshot.status.database_players_indexed >= snapshot.status.managed_squad_players);
         assert!(snapshot.status.background_players_indexed > 0);
         assert_eq!(
+            snapshot.status.live_memory_tactic_read,
+            "object_detected_unmapped"
+        );
+        assert!(snapshot.status.tactic_manager_pointer.is_some());
+        assert_eq!(
             snapshot.status.visible_players_loaded,
             snapshot.players.len() as u32
         );
         let visible_results = search_indexed_players("Jøran".to_string());
         assert!(visible_results
             .iter()
-            .all(|player| player["visibility"] == "club-visible"));
+            .all(|player| player["visibility"] == "known" || player["visibility"] == "unknown"));
     }
 
     #[test]

@@ -15,9 +15,9 @@ The desktop connector can currently:
 - keep every non-squad index record behind a visibility gate until club scout knowledge can be mapped safely;
 - validate signatures, object types, collection bounds and pointer chains before returning entities.
 
-Version `0.1.5` supports FM26 `6000.0.52.8888375`, product `6000.0.52f1-fm26-05f1 (87a0370e9917)`, x64, executable SHA-256 `3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73`.
+Version `0.1.6` supports FM26 `6000.0.52.8888375`, product `6000.0.52f1-fm26-05f1 (87a0370e9917)`, x64, executable SHA-256 `3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73`.
 
-Live-memory tactic reading is disabled and cannot block squad/player connection. The user may choose one `.fmf` tactic file through the native Windows file picker. GlassScout validates and copies that file into local app data, then reports whether its format can be decoded. The current FM26 FMF container is recognized but not yet fully decoded, so no formation, role, duty or tactic-fit result is guessed.
+Live-memory tactic inspection cannot block squad/player connection. GlassScout detects the active FM26 tactic manager with read-only access; formation, phase roles, duties and instructions remain unavailable until their packed build-specific layout is validated. No formation or fit result is guessed.
 
 The verified live test indexed 35,874 player records in the active save: 38 managed-squad records were visibility-safe and 35,836 wider-save records remained hidden behind the knowledge gate. Age, attributes, form, contracts, wages, valuations, scout-knowledge links and FM26's own shortlist are not yet mapped safely for this exact build. GlassScout leaves those fields empty and explains the limitation. It does not read or return CA, PA or hidden attributes.
 
@@ -27,7 +27,7 @@ GlassScout is live-game only. When the installed FM26 build has no verified enti
 
 - Screenshot-matched command dashboard with active-club context, tactical board, recruitment pulse, department briefing and squad health.
 - Squad Planner grouped by validated live FM26 position data.
-- Tactical Board with a user-selected `.fmf` file, local app-data storage and honest parser status.
+- Tactical Board reserved for validated active-save formation, phase roles, duties and instructions.
 - Recruitment Hub with visibility, interest, realism, financial, availability and risk fields that remain `Unknown` until real evidence exists.
 - Player dossiers matching the supplied scouting-report structure without filling unsupported fields.
 - Shortlist with add/remove, notes, filtering, sorting and comparison. Shortlist records store only player IDs and resolve against the newest live snapshot.
@@ -37,7 +37,7 @@ GlassScout is live-game only. When the installed FM26 build has no verified enti
 
 ## Install the Windows test build
 
-Download [GlassScout FM26 0.1.5 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.5/GlassScout.FM26_0.1.5_x64-setup.exe).
+Download [GlassScout FM26 0.1.6 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.6/GlassScout.FM26_0.1.6_x64-setup.exe).
 
 The NSIS setup installs GlassScout locally and uses Tauri's WebView2 bootstrapper when the required Windows web runtime is missing. The prerelease is not code-signed yet, so Windows SmartScreen may ask for confirmation.
 
