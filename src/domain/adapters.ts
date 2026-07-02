@@ -135,6 +135,12 @@ export type PlayerRoleFit = {
   positionFit: number;
   attributeFit: number | null;
   evidence: string[];
+  phase?: "in-possession" | "out-of-possession" | "combined";
+  inPossessionRole?: string | null;
+  outOfPossessionRole?: string | null;
+  inPossessionFit?: number | null;
+  outOfPossessionFit?: number | null;
+  redFlags?: string[];
 };
 
 export type FieldVisibility = "known" | "estimated" | "range" | "unknown";
