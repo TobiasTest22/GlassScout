@@ -110,7 +110,9 @@ function mergeIndexedProfile(existing: LivePlayer | undefined, profile: LivePlay
 
 export function GlassScoutApp() {
   const [mode, setMode] = useState<"fm26" | null>(null);
-  const [screen, setScreen] = useState<Screen>("Dashboard");
+  const [screen, setScreenState] = useState<Screen>("Dashboard");
+  const [screenHistory, setScreenHistory] = useState<Screen[]>(["Dashboard"]);
+  const [historyIndex, setHistoryIndex] = useState(0);
   const [search, setSearch] = useState("");
   const [snapshot, setSnapshot] = useState<LiveFootballSnapshot>(initialSnapshot);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
@@ -133,13 +135,41 @@ export function GlassScoutApp() {
   useEffect(() => {
     window.localStorage.setItem("glassscout-favorites-v1", JSON.stringify(favorites));
   }, [favorites]);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (!search.trim()) { setGlobalIndexed([]); return; }
-      searchIndexedPlayers(search).then((items) => setGlobalIndexed(items.slice(0, 8))).catch(() => setGlobalIndexed([]));
+      if (!search.trim()) {
+        setGlobalIndexed([]);
+        return;
+      }
+      searchIndexedPlayers(search)
+        .then((items) => setGlobalIndexed(items.slice(0, 8)))
+        .catch(() => setGlobalIndexed([]));
     }, search.trim() ? 160 : 0);
     return () => window.clearTimeout(timer);
   }, [search]);
+
+  const navigate = useCallback((nextScreen: Screen) => {
+    if (nextScreen === screen) return;
+    const nextIndex = historyIndex + 1;
+    setScreenHistory((current) => [...current.slice(0, nextIndex), nextScreen]);
+    setHistoryIndex(nextIndex);
+    setScreenState(nextScreen);
+  }, [historyIndex, screen]);
+
+  const goBack = useCallback(() => {
+    if (historyIndex <= 0) return;
+    const nextIndex = historyIndex - 1;
+    setHistoryIndex(nextIndex);
+    setScreenState(screenHistory[nextIndex]);
+  }, [historyIndex, screenHistory]);
+
+  const goForward = useCallback(() => {
+    if (historyIndex >= screenHistory.length - 1) return;
+    const nextIndex = historyIndex + 1;
+    setHistoryIndex(nextIndex);
+    setScreenState(screenHistory[nextIndex]);
+  }, [historyIndex, screenHistory]);
 
   const checkConnection = useCallback(async () => {
     setChecking(true);
@@ -151,13 +181,17 @@ export function GlassScoutApp() {
       setChecking(false);
     }
   }, []);
+
   const enterWorkspace = useCallback(() => {
-    setScreen("Dashboard");
+    setScreenState("Dashboard");
+    setScreenHistory(["Dashboard"]);
+    setHistoryIndex(0);
     setMode("fm26");
   }, []);
 
   const togglePlayerFavorite = (playerId: string) => setFavorites((current) => toggleFavorite(current, playerId));
   const updatePlayerNote = (playerId: string, note: string) => setFavorites((current) => updateFavoriteNote(current, playerId, note));
+
   const loadIndexedPlayerProfile = useCallback(async (playerId: string) => {
     try {
       const profile = await indexedPlayerProfile(playerId);
@@ -173,18 +207,34 @@ export function GlassScoutApp() {
       // The profile screen will keep its clean unavailable state if the local save index cannot resolve this player.
     }
   }, []);
+
   const openPlayer = useCallback((playerId: string) => {
     setReturnScreen((current) => screen === "Player Profile" || screen === "Club Profile" ? current : screen);
     setSelectedPlayerId(playerId);
-    setScreen("Player Profile");
+    navigate("Player Profile");
     void loadIndexedPlayerProfile(playerId);
-  }, [loadIndexedPlayerProfile, screen]);
-  const openClub = (clubId: string) => {
+  }, [loadIndexedPlayerProfile, navigate, screen]);
+
+  const openClub = useCallback((clubId: string) => {
     setReturnScreen((current) => screen === "Player Profile" || screen === "Club Profile" ? current : screen);
     setSelectedClubId(clubId);
-    setScreen("Club Profile");
-  };
-  const globalClubs = useMemo(() => search.trim() ? snapshot.clubs.filter((club) => club.name.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 4) : [], [search, snapshot.clubs]);
+    navigate("Club Profile");
+  }, [navigate, screen]);
+
+  const goBackOrReturn = useCallback(() => {
+    if (historyIndex > 0) {
+      goBack();
+      return;
+    }
+    navigate(returnScreen);
+  }, [goBack, historyIndex, navigate, returnScreen]);
+
+  const globalClubs = useMemo(
+    () => search.trim()
+      ? snapshot.clubs.filter((club) => club.name.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 4)
+      : [],
+    [search, snapshot.clubs],
+  );
 
   if (mode === null) {
     return (
@@ -195,7 +245,7 @@ export function GlassScoutApp() {
   }
 
   const content =
-    screen === "Dashboard" ? <DashboardScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onNavigate={setScreen} /> :
+    screen === "Dashboard" ? <DashboardScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onNavigate={navigate} /> :
     screen === "Squad" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onOpenPlayer={openPlayer} /> :
     screen === "Tactical Board" ? <TacticsScreen snapshot={snapshot} onOpenPlayer={openPlayer} /> :
     screen === "Scout Room" ? <ScoutRoomScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
@@ -206,16 +256,19 @@ export function GlassScoutApp() {
         snapshot={snapshot}
         favorite={selectedPlayerId ? favorites.some((record) => record.playerId === selectedPlayerId) : false}
         onToggleFavorite={() => selectedPlayerId && togglePlayerFavorite(selectedPlayerId)}
-        onBack={() => setScreen(returnScreen)}
+        onBack={goBackOrReturn}
         onOpenClub={openClub}
       />
-    ) : screen === "Club Profile" ? <ClubProfileScreen clubId={selectedClubId} snapshot={snapshot} onBack={() => setScreen(returnScreen)} onOpenPlayer={openPlayer} /> :
-    <SettingsScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} />;
+    ) : screen === "Club Profile" ? (
+      <ClubProfileScreen clubId={selectedClubId} snapshot={snapshot} onBack={goBackOrReturn} onOpenPlayer={openPlayer} />
+    ) : (
+      <SettingsScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} />
+    );
 
   return (
     <TooltipProvider>
       <div className="app-canvas">
-        <AppSidebar screen={screen} onNavigate={setScreen} />
+        <AppSidebar screen={screen} onNavigate={navigate} />
         <section className="app-main">
           <Topbar
             search={search}
@@ -224,12 +277,28 @@ export function GlassScoutApp() {
             screen={screen}
             checking={checking}
             onRefresh={checkConnection}
+            canGoBack={historyIndex > 0}
+            canGoForward={historyIndex < screenHistory.length - 1}
+            onGoBack={goBack}
+            onGoForward={goForward}
           />
           {search ? (
             <motion.div className="global-search-results" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
               <header><strong>Search results</strong><button onClick={() => setSearch("")}>Clear</button></header>
-              {globalClubs.map((club) => <button key={club.id} onClick={() => { openClub(club.id); setSearch(""); }}><span>Team</span><strong>{club.name}</strong><small>{club.league ?? "Competition unknown"}</small></button>)}
-              {globalIndexed.map((result) => <button key={result.id} onClick={() => { openPlayer(result.id); setSearch(""); }}><span>Player</span><strong>{result.name}</strong><small>{result.positions.join(" / ") || "Position unknown"} · {result.visibility}</small></button>)}
+              {globalClubs.map((club) => (
+                <button key={club.id} onClick={() => { openClub(club.id); setSearch(""); }}>
+                  <span>Team</span>
+                  <strong>{club.name}</strong>
+                  <small>{club.league ?? "Competition unknown"}</small>
+                </button>
+              ))}
+              {globalIndexed.map((result) => (
+                <button key={result.id} onClick={() => { openPlayer(result.id); setSearch(""); }}>
+                  <span>Player</span>
+                  <strong>{result.name}</strong>
+                  <small>{result.positions.join(" / ") || "Position unknown"} · {result.visibility}</small>
+                </button>
+              ))}
               {!globalClubs.length && !globalIndexed.length ? <p>No indexed player or mapped team matches “{search}”.</p> : null}
             </motion.div>
           ) : null}

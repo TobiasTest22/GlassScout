@@ -69,7 +69,6 @@ export function AppSidebar({
         <span>Settings</span>
       </Button>
       <div className="sidebar-footer">
-        <span className="manager-avatar">TB</span>
         <span><strong>Scouting desk</strong><small>Live FM26</small></span>
         <CalendarDays aria-hidden="true" />
       </div>
