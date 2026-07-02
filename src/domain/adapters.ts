@@ -34,6 +34,8 @@ export type LiveConnectorStatus = {
   moduleBase?: string | null;
   entityMapStatus?: "missing" | "matched" | "invalid" | "not_checked";
   entityMapProfileId?: string | null;
+  mappingSchemaVersion?: number;
+  mappingCoverage?: Array<{ section: string; validated: number; candidate: number; unmapped: number }>;
   pointerValidation?: "not_run" | "passed" | "failed";
   handleAccessFlags?: string;
   entityRoot?: string | null;
@@ -198,6 +200,8 @@ const desktopRequiredStatus: LiveConnectorStatus = {
   moduleBase: null,
   entityMapStatus: "not_checked",
   entityMapProfileId: null,
+  mappingSchemaVersion: 2,
+  mappingCoverage: [],
   pointerValidation: "not_run",
   handleAccessFlags: "Not available in browser",
   entityRoot: null,
@@ -286,6 +290,55 @@ export async function searchIndexedPlayers(query: string): Promise<IndexedPlayer
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return [];
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<IndexedPlayerSearchResult[]>("search_indexed_players", { query });
+}
+
+export async function indexedPlayersByIds(playerIds: string[]): Promise<IndexedPlayerSearchResult[]> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window) || playerIds.length === 0) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<IndexedPlayerSearchResult[]>("indexed_players_by_ids", { playerIds });
+}
+
+export type MappingLabStatus = {
+  enabled: boolean;
+  readOnly: boolean;
+  maximumWindowBytes: number;
+  evidenceDirectory: string | null;
+  message: string;
+};
+
+export type MappingLabCaptureResult = {
+  success: boolean;
+  snapshotId: string;
+  evidenceFile: string;
+  playerId: string;
+  playerName: string;
+  windowsCaptured: number;
+  bytesCaptured: number;
+};
+
+export async function getMappingLabStatus(): Promise<MappingLabStatus | null> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MappingLabStatus>("mapping_lab_status");
+}
+
+export async function captureMappingEvidence(playerId: string, label: string): Promise<MappingLabCaptureResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MappingLabCaptureResult>("mapping_lab_capture", { playerId, label, windowSize: 1024 });
+}
+
+export type MappingLabComparisonResult = {
+  success: boolean;
+  firstSnapshotId: string;
+  secondSnapshotId: string;
+  changedBytes: number;
+  unchangedBytes: number;
+  evidenceFile: string;
+};
+
+export async function compareMappingEvidence(firstSnapshotId: string, secondSnapshotId: string): Promise<MappingLabComparisonResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MappingLabComparisonResult>("mapping_lab_compare", { firstSnapshotId, secondSnapshotId });
 }
 
 export const realLifeAdapter: FutureRealLifeAdapter = {

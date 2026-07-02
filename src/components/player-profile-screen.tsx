@@ -22,10 +22,11 @@ import { PlayerFace } from "@/components/player-face";
 import { ClubLogo } from "@/components/club-logo";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const technicalAttributes = ["Technique", "Dribbling", "Passing", "First Touch", "Finishing", "Crossing", "Long Shots"];
-const mentalAttributes = ["Vision", "Decisions", "Composure", "Anticipation", "Work Rate", "Flair", "Teamwork"];
-const physicalAttributes = ["Acceleration", "Pace", "Agility", "Balance", "Strength", "Stamina", "Natural Fitness"];
+const technicalAttributes = ["Crossing", "Dribbling", "Finishing", "First Touch", "Heading", "Long Shots", "Marking", "Passing", "Tackling", "Technique"];
+const mentalAttributes = ["Aggression", "Anticipation", "Bravery", "Composure", "Concentration", "Decisions", "Determination", "Flair", "Leadership", "Off the Ball", "Positioning", "Teamwork", "Vision", "Work Rate"];
+const physicalAttributes = ["Acceleration", "Agility", "Balance", "Jumping Reach", "Natural Fitness", "Pace", "Stamina", "Strength"];
 const setPieceAttributes = ["Corners", "Free Kick Taking", "Penalty Taking", "Long Throws"];
+const goalkeepingAttributes = ["Aerial Reach", "Command of Area", "Communication", "Eccentricity", "Handling", "Kicking", "One on Ones", "Punching", "Reflexes", "Rushing Out", "Throwing"];
 
 function evidenceValue(player: LivePlayer, attribute: string) {
   const value = player.attributes?.[attribute];
@@ -177,11 +178,12 @@ export function PlayerProfileScreen({
 
               <section className="dossier-panel attribute-evidence-panel">
                 <header><BarChart3 /><h2>Attribute evidence</h2><span>Visible values only</span></header>
-                <div className="attribute-grid">
+                <div className="attribute-grid attribute-grid-five">
                   <AttributeGroup title="Technical" names={technicalAttributes} player={player} />
                   <AttributeGroup title="Mental" names={mentalAttributes} player={player} />
                   <AttributeGroup title="Physical" names={physicalAttributes} player={player} />
                   <AttributeGroup title="Set pieces" names={setPieceAttributes} player={player} />
+                  <AttributeGroup title="Goalkeeping" names={goalkeepingAttributes} player={player} />
                 </div>
               </section>
             </div>
@@ -245,11 +247,12 @@ export function PlayerProfileScreen({
         <TabsContent value="attributes">
           <section className="dossier-panel tab-evidence-panel">
             <header><BarChart3 /><h2>Attribute profile</h2><span>{mappedAttributeCount} visible values</span></header>
-            <div className="attribute-grid attribute-grid-four">
+            <div className="attribute-grid attribute-grid-five">
               <AttributeGroup title="Technical" names={technicalAttributes} player={player} />
               <AttributeGroup title="Mental" names={mentalAttributes} player={player} />
               <AttributeGroup title="Physical" names={physicalAttributes} player={player} />
               <AttributeGroup title="Set pieces" names={setPieceAttributes} player={player} />
+              <AttributeGroup title="Goalkeeping" names={goalkeepingAttributes} player={player} />
             </div>
           </section>
         </TabsContent>

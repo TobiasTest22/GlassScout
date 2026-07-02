@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 mod connector;
+mod mapping_lab;
 mod player_face;
 mod visibility;
 
@@ -26,6 +27,10 @@ pub fn run() {
             connector::connector_snapshot,
             connector::load_active_save,
             connector::search_indexed_players,
+            connector::indexed_players_by_ids,
+            mapping_lab::mapping_lab_status,
+            mapping_lab::mapping_lab_capture,
+            mapping_lab::mapping_lab_compare,
             player_face::club_logo_data,
             player_face::player_face_data,
             visibility::filter_observations

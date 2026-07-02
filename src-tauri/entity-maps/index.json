@@ -1,8 +1,15 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "profiles": [
     {
       "id": "fm26-6000.0.52.8888375-win64-3653c97f",
+      "buildFingerprint": {
+        "executableSha256": "3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73",
+        "fileVersion": "6000.0.52.8888375",
+        "productVersion": "6000.0.52f1-fm26-05f1 (87a0370e9917)",
+        "architecture": "x64",
+        "module": "game_plugin.dll"
+      },
       "fileVersion": "6000.0.52.8888375",
       "productVersion": "6000.0.52f1-fm26-05f1 (87a0370e9917)",
       "executableSha256": "3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73",
@@ -15,16 +22,8 @@
         }
       ],
       "pointerChains": [
-        {
-          "name": "managed_team",
-          "root": "human_manager",
-          "offsets": [1104, 168, 16]
-        },
-        {
-          "name": "managed_club",
-          "root": "managed_team",
-          "offsets": [48]
-        }
+        { "name": "managed_team", "root": "human_manager", "offsets": [1104, 168, 16] },
+        { "name": "managed_club", "root": "managed_team", "offsets": [48] }
       ],
       "constants": {
         "managerRegistryVectorOffset": 24,
@@ -49,6 +48,39 @@
         "nationNameOffset": 24,
         "personBirthDateOffset": 136,
         "tacticsManagerVtableRva": 74061456
+      },
+      "sections": {
+        "player": {
+          "uniqueId": { "offset": 12, "source": "person", "valueType": "u32", "transform": "decimal-string", "status": "validated", "confidence": 1.0, "validations": ["38 managed players", "35874 indexed records", "stable across repeated reads"] },
+          "name": { "offset": 80, "source": "person", "valueType": "fm-string-pointer", "transform": "first-common-last", "status": "validated", "confidence": 1.0, "validations": ["managed squad names match FM26", "bounded UTF-8 checks"] },
+          "dateOfBirth": { "offset": 136, "source": "person", "valueType": "fm-date", "transform": "year-day-of-year", "status": "validated", "confidence": 1.0, "validations": ["Lars Sveingard 1995-08-13", "age matches active save date"] },
+          "nationality": { "offset": 104, "source": "person", "valueType": "pointer", "transform": "nation-name@24", "status": "validated", "confidence": 0.98, "validations": ["managed squad nationality labels match FM26"] },
+          "positions": { "offset": 336, "source": "player", "valueType": "u8[15]", "transform": "familiarity-enum", "status": "validated", "confidence": 1.0, "validations": ["all managed players pass 0-20 bounds", "position labels match FM26"] },
+          "attributes": { "offset": 351, "source": "player", "valueType": "u8[54]", "transform": "(raw+4)/5; hidden indexes gated", "status": "validated", "confidence": 0.99, "validations": ["all managed players pass 0-100 bounds", "visible values checked in FM26", "hidden attributes excluded"] },
+          "preferredFoot": { "offset": 375, "source": "player", "valueType": "u8[2]", "transform": "qualitative-foot-label", "status": "validated", "confidence": 0.97, "validations": ["left/right foot evidence matches managed profiles"] },
+          "form": { "offset": null, "source": "player", "valueType": "unknown", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] }
+        },
+        "contract": {
+          "contractPointer": { "offset": 168, "source": "person", "valueType": "pointer", "transform": "non-null active contract", "status": "validated", "confidence": 1.0, "validations": ["manager contract resolves managed team", "player contract objects readable"] },
+          "wage": { "offset": null, "source": "contract", "valueType": "currency", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] },
+          "expiryDate": { "offset": null, "source": "contract", "valueType": "fm-date", "transform": "year-day-of-year", "status": "unmapped", "confidence": 0.0, "validations": [] },
+          "status": { "offset": null, "source": "contract", "valueType": "enum", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] },
+          "marketValue": { "offset": null, "source": "player-or-contract", "valueType": "currency-range", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] }
+        },
+        "recruitment": {
+          "scoutKnowledge": { "offset": null, "source": "game-scouted-person relation", "valueType": "enum-or-bitset", "transform": null, "status": "candidate", "confidence": 0.25, "validations": ["GAME_SCOUTED_PERSON RTTI located", "relationship owner not yet validated"] },
+          "attributeRanges": { "offset": null, "source": "game-scouted-person relation", "valueType": "range[54]", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] },
+          "scoutConfidence": { "offset": null, "source": "scout-report relation", "valueType": "percentage", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] },
+          "playerInterest": { "offset": null, "source": "club-person relation", "valueType": "enum", "transform": null, "status": "candidate", "confidence": 0.25, "validations": ["FM26 Interested/Doubtful filter states captured for player 2000478798", "3072 player/person/contract bytes remained unchanged, confirming the value is relationship-owned", "relation owner not yet validated"] },
+          "transferAvailability": { "offset": null, "source": "contract-or-transfer relation", "valueType": "flags", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] }
+        },
+        "tactic": {
+          "managerObject": { "offset": 74061456, "source": "module-vtable-rva", "valueType": "vtable", "transform": "unique private object scan", "status": "candidate", "confidence": 0.7, "validations": ["TACTICS_MANAGER RTTI matched", "unique object observed in active save"] },
+          "formation": { "offset": null, "source": "tactics-manager", "valueType": "slot-array", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] },
+          "roles": { "offset": null, "source": "tactics-manager", "valueType": "enum-array", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] },
+          "duties": { "offset": null, "source": "tactics-manager", "valueType": "enum-array", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] },
+          "teamInstructions": { "offset": null, "source": "tactics-manager", "valueType": "flags", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] }
+        }
       }
     }
   ]

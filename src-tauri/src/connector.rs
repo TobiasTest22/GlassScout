@@ -104,6 +104,8 @@ pub struct ConnectorStatus {
     module_base: Option<String>,
     entity_map_status: &'static str,
     entity_map_profile_id: Option<String>,
+    mapping_schema_version: u32,
+    mapping_coverage: Vec<MappingCoverage>,
     pointer_validation: &'static str,
     handle_access_flags: &'static str,
     entity_root: Option<String>,
@@ -117,6 +119,15 @@ pub struct ConnectorStatus {
     windows_error_code: Option<u32>,
     message: String,
     warnings: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MappingCoverage {
+    section: String,
+    validated: u32,
+    candidate: u32,
+    unmapped: u32,
 }
 
 #[derive(Serialize)]
@@ -154,6 +165,7 @@ struct EntityMapIndex {
 #[serde(rename_all = "camelCase")]
 struct EntityMapProfile {
     id: String,
+    build_fingerprint: BuildFingerprint,
     file_version: String,
     product_version: String,
     executable_sha256: String,
@@ -162,6 +174,29 @@ struct EntityMapProfile {
     signatures: Vec<EntitySignature>,
     pointer_chains: Vec<PointerChain>,
     constants: MapConstants,
+    sections: HashMap<String, HashMap<String, FieldDefinition>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildFingerprint {
+    executable_sha256: String,
+    file_version: String,
+    product_version: String,
+    architecture: String,
+    module: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldDefinition {
+    offset: Option<u64>,
+    source: String,
+    value_type: String,
+    transform: Option<String>,
+    status: String,
+    confidence: f64,
+    validations: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -234,6 +269,9 @@ struct IndexedPlayerRecord {
     positions: Vec<String>,
     managed_squad: bool,
     visibility_safe: bool,
+    raw_player_address: u64,
+    person_address: u64,
+    contract_address: Option<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -306,17 +344,7 @@ pub fn search_indexed_players(query: String) -> Vec<Value> {
                     .iter()
                     .any(|position| position.to_lowercase().contains(&normalized))
         })
-        .map(|record| {
-            json!({
-                "id": record.id,
-                "name": record.name,
-                "positions": record.positions,
-                "managedSquad": record.managed_squad,
-                "visibility": if record.visibility_safe { "known" } else { "unknown" },
-                "scoutKnowledge": if record.visibility_safe { "fully_known" } else { "unknown" },
-                "scoutConfidence": if record.visibility_safe { 100 } else { 0 }
-            })
-        })
+        .map(indexed_player_json)
         .collect();
     results.sort_by(|left, right| {
         left["name"]
@@ -326,6 +354,128 @@ pub fn search_indexed_players(query: String) -> Vec<Value> {
     });
     results.truncate(500);
     results
+}
+
+#[tauri::command]
+pub fn indexed_players_by_ids(player_ids: Vec<String>) -> Vec<Value> {
+    let Some(index) = PLAYER_DATABASE_INDEX.get() else {
+        return Vec::new();
+    };
+    let Ok(index) = index.read() else {
+        return Vec::new();
+    };
+    player_ids
+        .iter()
+        .filter_map(|id| index.records.get(id))
+        .map(indexed_player_json)
+        .collect()
+}
+
+fn indexed_player_json(record: &IndexedPlayerRecord) -> Value {
+    json!({
+        "id": record.id,
+        "name": record.name,
+        "positions": record.positions,
+        "managedSquad": record.managed_squad,
+        "visibility": if record.visibility_safe { "known" } else { "unknown" },
+        "scoutKnowledge": if record.visibility_safe { "fully_known" } else { "unknown" },
+        "scoutConfidence": if record.visibility_safe { 100 } else { 0 }
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MappingLabWindow {
+    pub(crate) object: &'static str,
+    pub(crate) base_address: String,
+    pub(crate) bytes: Vec<u8>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MappingLabCaptureData {
+    pub(crate) player_id: String,
+    pub(crate) player_name: String,
+    pub(crate) process_id: u32,
+    pub(crate) save_pointer: String,
+    pub(crate) entity_map_profile_id: String,
+    pub(crate) executable_sha256: String,
+    pub(crate) windows: Vec<MappingLabWindow>,
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn capture_mapping_lab_player(
+    player_id: &str,
+    window_size: usize,
+) -> Result<MappingLabCaptureData, String> {
+    let window_size = window_size.clamp(64, 4096);
+    let index = PLAYER_DATABASE_INDEX
+        .get()
+        .ok_or_else(|| "Load the active save before capturing mapping evidence.".to_string())?
+        .read()
+        .map_err(|_| "The live player index is unavailable.".to_string())?;
+    let record = index
+        .records
+        .get(player_id)
+        .cloned()
+        .or_else(|| {
+            let mut matches = index
+                .records
+                .values()
+                .filter(|record| record.name.eq_ignore_ascii_case(player_id));
+            let first = matches.next()?.clone();
+            matches.next().is_none().then_some(first)
+        })
+        .ok_or_else(|| {
+            "No unique indexed player matched that FM ID or exact player name.".to_string()
+        })?;
+    let process_id = index.process_id;
+    let save_pointer = index.save_pointer;
+    drop(index);
+
+    let mut reader = ProcessReader::open(process_id)
+        .map_err(|code| format!("Read-only FM26 access failed with Windows error {code}."))?;
+    let process_path = reader
+        .process_path()
+        .ok_or_else(|| "The FM26 executable path could not be read.".to_string())?;
+    let identity = read_executable_identity(&process_path);
+    let profile = find_entity_map(&identity)
+        .ok_or_else(|| "The running FM26 build does not match an exact entity map.".to_string())?;
+    let mut targets = vec![
+        ("player", record.raw_player_address),
+        ("person", record.person_address),
+    ];
+    if let Some(contract) = record.contract_address {
+        targets.push(("contract", contract));
+    }
+    let mut windows = Vec::with_capacity(targets.len());
+    for (object, address) in targets {
+        let bytes = reader
+            .read_bytes(address, window_size)
+            .ok_or_else(|| format!("The bounded {object} window was not readable."))?;
+        windows.push(MappingLabWindow {
+            object,
+            base_address: hex_address(address),
+            bytes,
+        });
+    }
+    Ok(MappingLabCaptureData {
+        player_id: record.id,
+        player_name: record.name,
+        process_id,
+        save_pointer: hex_address(save_pointer),
+        entity_map_profile_id: profile.id.clone(),
+        executable_sha256: identity.sha256.unwrap_or_default(),
+        windows,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn capture_mapping_lab_player(
+    _player_id: &str,
+    _window_size: usize,
+) -> Result<MappingLabCaptureData, String> {
+    Err("The FM26 mapping lab requires Windows.".to_string())
 }
 
 fn empty_status() -> ConnectorStatus {
@@ -358,6 +508,8 @@ fn empty_status() -> ConnectorStatus {
         module_base: None,
         entity_map_status: "not_checked",
         entity_map_profile_id: None,
+        mapping_schema_version: 2,
+        mapping_coverage: Vec::new(),
         pointer_validation: "not_run",
         handle_access_flags: "PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ (0x1410)",
         entity_root: None,
@@ -450,6 +602,7 @@ fn collect_snapshot(
     };
     status.entity_map_status = "matched";
     status.entity_map_profile_id = Some(profile.id.clone());
+    status.mapping_coverage = mapping_coverage(profile);
 
     let Some(module) = reader.module(&profile.module) else {
         status.state = "parser_unverified";
@@ -899,6 +1052,9 @@ fn extract_live_data(
             })
             .collect();
         let player_id = uid.to_string();
+        let contract_address = reader
+            .read_pointer(person + profile.constants.person_contract_offset)
+            .filter(|value| *value != 0);
         managed_player_ids.insert(player_id.clone());
         managed_index_records.push(IndexedPlayerRecord {
             id: player_id.clone(),
@@ -906,6 +1062,9 @@ fn extract_live_data(
             positions: positions.clone(),
             managed_squad: true,
             visibility_safe: true,
+            raw_player_address: raw_player,
+            person_address: person,
+            contract_address,
         });
         players.push(json!({
             "id": player_id,
@@ -1218,6 +1377,11 @@ fn read_indexed_player_candidate(
         positions,
         managed_squad: false,
         visibility_safe: false,
+        raw_player_address: raw_player,
+        person_address: person,
+        contract_address: reader
+            .read_pointer(person.checked_add(profile.constants.person_contract_offset)?)
+            .filter(|value| *value != 0),
     })
 }
 
@@ -1519,11 +1683,16 @@ fn find_entity_map(identity: &ExecutableIdentity) -> Option<&'static EntityMapPr
         serde_json::from_str(include_str!("../entity-maps/index.json"))
             .expect("embedded entity-map index must be valid JSON")
     });
-    if index.schema_version != 1 {
+    if index.schema_version != 2 {
         return None;
     }
     index.profiles.iter().find(|profile| {
         let declared_shape_is_valid = !profile.module.is_empty()
+            && profile.build_fingerprint.executable_sha256 == profile.executable_sha256
+            && profile.build_fingerprint.file_version == profile.file_version
+            && profile.build_fingerprint.product_version == profile.product_version
+            && profile.build_fingerprint.architecture == profile.architecture
+            && profile.build_fingerprint.module == profile.module
             && profile
                 .signatures
                 .iter()
@@ -1537,6 +1706,59 @@ fn find_entity_map(identity: &ExecutableIdentity) -> Option<&'static EntityMapPr
             && identity.sha256.as_deref() == Some(profile.executable_sha256.as_str())
             && identity.architecture.as_deref() == Some(profile.architecture.as_str())
     })
+}
+
+fn mapping_coverage(profile: &EntityMapProfile) -> Vec<MappingCoverage> {
+    let mut coverage: Vec<MappingCoverage> = profile
+        .sections
+        .iter()
+        .map(|(section, fields)| {
+            let mut item = MappingCoverage {
+                section: section.clone(),
+                validated: 0,
+                candidate: 0,
+                unmapped: 0,
+            };
+            for field in fields.values() {
+                let structurally_valid = !field.source.is_empty()
+                    && !field.value_type.is_empty()
+                    && field.confidence.is_finite()
+                    && (0.0..=1.0).contains(&field.confidence)
+                    && (field.status != "validated" || field_is_publishable(field));
+                let _transform_is_declared = field.transform.as_deref().unwrap_or("identity");
+                if !structurally_valid {
+                    item.unmapped += 1;
+                } else {
+                    match field.status.as_str() {
+                        "validated" => item.validated += 1,
+                        "candidate" => item.candidate += 1,
+                        _ => item.unmapped += 1,
+                    }
+                }
+            }
+            item
+        })
+        .collect();
+    coverage.sort_by(|left, right| left.section.cmp(&right.section));
+    coverage
+}
+
+fn field_is_publishable(field: &FieldDefinition) -> bool {
+    field.status == "validated"
+        && field.offset.is_some()
+        && field.confidence >= 0.95
+        && !field.validations.is_empty()
+}
+
+#[cfg(test)]
+fn checked_currency_transform(raw: i64, scale: u64, maximum: u64) -> Option<u64> {
+    let value = u64::try_from(raw).ok()?.checked_mul(scale)?;
+    (value <= maximum).then_some(value)
+}
+
+#[cfg(test)]
+fn validated_enum<'a>(raw: usize, values: &'a [&'a str]) -> Option<&'a str> {
+    values.get(raw).copied()
 }
 
 fn read_executable_identity(path: &str) -> ExecutableIdentity {
@@ -2018,13 +2240,23 @@ mod tests {
     fn exact_build_profile_is_embedded_and_read_only() {
         let index: EntityMapIndex =
             serde_json::from_str(include_str!("../entity-maps/index.json")).unwrap();
-        assert_eq!(index.schema_version, 1);
+        assert_eq!(index.schema_version, 2);
         assert_eq!(index.profiles.len(), 1);
         assert_eq!(index.profiles[0].module, "game_plugin.dll");
         assert_eq!(
             index.profiles[0].executable_sha256,
             "3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73"
         );
+        let coverage = mapping_coverage(&index.profiles[0]);
+        assert!(coverage
+            .iter()
+            .any(|section| section.section == "player" && section.validated >= 7));
+        assert!(coverage
+            .iter()
+            .any(|section| section.section == "contract" && section.unmapped >= 4));
+        assert!(coverage
+            .iter()
+            .any(|section| section.section == "recruitment" && section.candidate >= 2));
     }
 
     #[test]
@@ -2146,5 +2378,44 @@ mod tests {
         ] {
             assert!(!attributes.contains_key(hidden));
         }
+    }
+
+    #[test]
+    fn currency_and_enum_transforms_reject_invalid_values() {
+        assert_eq!(
+            checked_currency_transform(125_000, 1, 1_000_000_000),
+            Some(125_000)
+        );
+        assert_eq!(checked_currency_transform(-1, 1, 1_000_000_000), None);
+        assert_eq!(
+            checked_currency_transform(2_000_000, 1_000, 1_000_000_000),
+            None
+        );
+        assert_eq!(
+            validated_enum(1, &["unknown", "interested", "not_interested"]),
+            Some("interested")
+        );
+        assert_eq!(validated_enum(4, &["unknown", "interested"]), None);
+    }
+
+    #[test]
+    fn candidates_cannot_cross_the_publication_confidence_gate() {
+        let candidate = FieldDefinition {
+            offset: Some(32),
+            source: "contract".to_string(),
+            value_type: "currency".to_string(),
+            transform: Some("identity".to_string()),
+            status: "candidate".to_string(),
+            confidence: 0.94,
+            validations: vec!["one observation".to_string()],
+        };
+        assert!(!field_is_publishable(&candidate));
+        let validated = FieldDefinition {
+            status: "validated".to_string(),
+            confidence: 0.97,
+            validations: vec!["100 players".to_string(), "two saves".to_string()],
+            ..candidate
+        };
+        assert!(field_is_publishable(&validated));
     }
 }

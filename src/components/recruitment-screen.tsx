@@ -7,6 +7,7 @@ import { searchIndexedPlayers } from "@/domain/adapters";
 import type { FavoriteRecord } from "@/domain/live-data";
 import { LiveDataState } from "@/components/live-data-state";
 import { PlayerFace } from "@/components/player-face";
+import { ClubLogo } from "@/components/club-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -152,7 +153,7 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
           const hasLiveDossier = liveById.has(player.id);
           return (
             <article key={player.id} className={hasLiveDossier ? "" : "indexed-player-row"} onClick={() => hasLiveDossier && onOpenPlayer(player.id)}>
-              <div className="target-identity"><PlayerFace playerId={player.id} name={player.name} size="sm" highResolution /><div><strong>{player.name}</strong><small>{player.age ?? "Age unknown"} · {player.nationality ?? "Nation unknown"} · {player.positions.join(" / ") || "Position unknown"}</small><b>{club?.name ?? "Club not mapped"}</b></div></div>
+              <div className="target-identity"><PlayerFace playerId={player.id} name={player.name} size="sm" highResolution /><div><strong>{player.name}</strong><small>{player.age ?? "Age unknown"} · {player.nationality ?? "Nation unknown"} · {player.positions.join(" / ") || "Position unknown"} · FM ID {player.id}</small><b className="target-club">{club ? <ClubLogo clubId={club.id} name={club.name} size="sm" /> : null}{club?.name ?? "Club not mapped"}</b></div></div>
               <div className="scout-fit-cell"><RatingRing value={player.roleFit} /><span><strong>{player.bestRole ?? "Not evaluated"}</strong><small>{player.tacticalFit == null ? "Live tactic required" : `${player.tacticalFit}% tactic fit`}</small></span></div>
               <div><strong>{knowledgeLabel(player)}</strong><small>{player.scoutConfidence == null ? "Confidence unknown" : `${player.scoutConfidence}% confidence`}</small></div>
               <div><strong>{interestLabel(player)}</strong><small>{interestLabel(player) === "Unknown" ? "Not mapped for this build" : "From FM26"}</small></div>
