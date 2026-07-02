@@ -17,15 +17,33 @@ import {
 } from "lucide-react";
 import type { LiveFootballSnapshot, LivePlayer } from "@/domain/adapters";
 import { Button } from "@/components/ui/button";
+import { ConfidenceRing } from "@/components/confidence-ring";
+import { PlayerFace } from "@/components/player-face";
+import { ClubLogo } from "@/components/club-logo";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const technicalAttributes = ["Technique", "Dribbling", "Passing", "First Touch", "Finishing", "Crossing", "Long Shots"];
-const mentalAttributes = ["Vision", "Decisions", "Composure", "Anticipation", "Work Rate", "Flair", "Consistency"];
-const physicalAttributes = ["Acceleration", "Pace", "Agility", "Balance", "Strength", "Stamina", "Injury Proneness"];
+const technicalAttributes = ["Crossing", "Dribbling", "Finishing", "First Touch", "Heading", "Long Shots", "Marking", "Passing", "Tackling", "Technique"];
+const mentalAttributes = ["Aggression", "Anticipation", "Bravery", "Composure", "Concentration", "Decisions", "Determination", "Flair", "Leadership", "Off the Ball", "Positioning", "Teamwork", "Vision", "Work Rate"];
+const physicalAttributes = ["Acceleration", "Agility", "Balance", "Jumping Reach", "Natural Fitness", "Pace", "Stamina", "Strength"];
+const setPieceAttributes = ["Corners", "Free Kick Taking", "Penalty Taking", "Long Throws"];
+const goalkeepingAttributes = ["Aerial Reach", "Command of Area", "Communication", "Eccentricity", "Handling", "Kicking", "One on Ones", "Punching", "Reflexes", "Rushing Out", "Throwing"];
 
 function evidenceValue(player: LivePlayer, attribute: string) {
   const value = player.attributes?.[attribute];
   return typeof value === "number" ? String(value) : "Unknown";
+}
+
+function metricLabel(value: string) {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\bXg\b/i, "xG")
+    .replace(/\bXa\b/i, "xA")
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function metricValue(label: string, value: unknown) {
+  if (typeof value !== "number") return "Unknown";
+  return value.toFixed(label.toLowerCase().includes("per 90") ? 2 : 0);
 }
 
 function AttributeGroup({ title, names, player }: { title: string; names: string[]; player: LivePlayer }) {
@@ -39,8 +57,55 @@ function AttributeGroup({ title, names, player }: { title: string; names: string
   );
 }
 
-function UnknownRing() {
-  return <span className="unknown-confidence-ring"><strong>—</strong><small>Unknown</small></span>;
+function PlayerPolygram({ player }: { player: LivePlayer }) {
+  const axes = [
+    ["Technique", ["Technique", "First Touch", "Dribbling"]],
+    ["Creation", ["Passing", "Vision", "Flair"]],
+    ["Defending", ["Marking", "Tackling", "Positioning"]],
+    ["Movement", ["Acceleration", "Pace", "Agility"]],
+    ["Physical", ["Strength", "Stamina", "Jumping Reach"]],
+    ["Set pieces", setPieceAttributes],
+  ] as const;
+  const centre = 110;
+  const radius = 76;
+  const points = axes.map(([, names], index) => {
+    const values = names.flatMap((name) => typeof player.attributes?.[name] === "number" ? [player.attributes[name] as number] : []);
+    const value = values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : 0;
+    const angle = -Math.PI / 2 + (index * Math.PI * 2) / axes.length;
+    const distance = radius * (value / 20);
+    return `${centre + Math.cos(angle) * distance},${centre + Math.sin(angle) * distance}`;
+  }).join(" ");
+  return (
+    <section className="dossier-panel polygram-panel">
+      <header><BarChart3 /><h2>Ability polygram</h2></header>
+      <svg viewBox="0 0 220 220" role="img" aria-label="Visible attribute polygram">
+        {[.25, .5, .75, 1].map((scale) => <polygon key={scale} points={axes.map((_, index) => { const angle = -Math.PI / 2 + (index * Math.PI * 2) / axes.length; return `${centre + Math.cos(angle) * radius * scale},${centre + Math.sin(angle) * radius * scale}`; }).join(" ")} className="polygram-grid" />)}
+        {axes.map(([label], index) => { const angle = -Math.PI / 2 + (index * Math.PI * 2) / axes.length; const x = centre + Math.cos(angle) * 98; const y = centre + Math.sin(angle) * 98; return <text key={label} x={x} y={y} textAnchor="middle">{label}</text>; })}
+        <polygon points={points} className="polygram-shape" />
+      </svg>
+      <p>Built only from visible attributes; missing axes remain at zero.</p>
+    </section>
+  );
+}
+
+function RoleFitCards({ player, limit = 6 }: { player: LivePlayer; limit?: number }) {
+  const roles = player.playableRoles?.slice(0, limit) ?? [];
+  if (!roles.length) {
+    return <p className="role-fit-empty">No playable FM26 role score has been validated from the current mapped attributes.</p>;
+  }
+  return (
+    <div className="role-fit-cards">
+      {roles.map((role) => (
+        <article key={role.roleKey} style={{ "--role-score": `${role.score}%` } as CSSProperties}>
+          <span><strong>{role.shortRole}</strong><small>{role.score}</small></span>
+          <div>
+            <b>{role.role}</b>
+            <small>{role.positions.join(" / ")} · position {role.positionFit}% · attributes {role.attributeFit ?? "—"}%</small>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 export function PlayerProfileScreen({
@@ -49,25 +114,28 @@ export function PlayerProfileScreen({
   favorite,
   onToggleFavorite,
   onBack,
+  onOpenClub,
 }: {
   player: LivePlayer | null;
   snapshot: LiveFootballSnapshot;
   favorite: boolean;
   onToggleFavorite: () => void;
   onBack: () => void;
+  onOpenClub?: (clubId: string) => void;
 }) {
   if (!player) {
     return (
       <main className="screen">
         <Button variant="outline" onClick={onBack}><ArrowLeft data-icon="inline-start" />Back</Button>
-        <section className="favorites-empty"><h1>Player unavailable</h1><p>This player is not present in the latest visibility-safe dataset.</p></section>
+        <section className="favorites-empty"><h1>Player unavailable</h1><p>This player is not present in the latest live or indexed FM26 data.</p></section>
       </main>
     );
   }
 
   const club = player.clubId ? snapshot.clubs.find((item) => item.id === player.clubId) : null;
+  const clubName = club?.name ?? player.clubName;
   const mappedAttributeCount = Object.values(player.attributes ?? {}).filter((value) => typeof value === "number").length;
-  const knownEvidence = Math.min(100, Math.round(((2 + mappedAttributeCount) / 23) * 100));
+  const knownEvidence = player.scoutConfidence ?? Math.min(100, Math.round((mappedAttributeCount / 47) * 100));
   const unknownEvidence = 100 - knownEvidence;
 
   return (
@@ -75,30 +143,31 @@ export function PlayerProfileScreen({
       <header className="dossier-header">
         <div className="dossier-heading">
           <Button variant="ghost" size="icon" aria-label="Back to players" onClick={onBack}><ArrowLeft /></Button>
-          <div><h1>{player.name}</h1><p>Visibility-safe live FM26 dossier</p></div>
+          <PlayerFace playerId={player.id} name={player.name} size="lg" />
+          <div><h1>{player.name}</h1><p>Live FM26 player dossier</p></div>
         </div>
         <div className="dossier-actions">
           <Button variant="outline" disabled><GitCompareArrows data-icon="inline-start" />Compare</Button>
-          <Button variant="outline" onClick={onToggleFavorite}><Star data-icon="inline-start" />{favorite ? "Shortlisted" : "Shortlist"}</Button>
+          <Button variant="outline" className={favorite ? "shortlist-active" : ""} onClick={onToggleFavorite}><Star data-icon="inline-start" fill={favorite ? "currentColor" : "none"} />{favorite ? "Shortlisted" : "Shortlist"}</Button>
           <Button disabled><ClipboardList data-icon="inline-start" />Request full report</Button>
         </div>
       </header>
 
       <section className="player-facts">
         <span><b>Nationality</b><strong>{player.nationality ?? "Unknown"}</strong></span>
-        <span><b>Club</b><strong>{club?.name ?? "Unknown"}</strong></span>
-        <span><b>Age</b><strong>{player.age ?? "Unknown"}</strong></span>
+        <button className="player-club-fact" disabled={!club} onClick={() => club && onOpenClub?.(club.id)}>{club ? <ClubLogo clubId={club.id} name={club.name} size="sm" /> : null}<span><b>Club</b><strong>{clubName ?? "Unknown"}</strong></span></button>
+        <span><b>Age / DOB</b><strong>{player.age ?? "Unknown"}{player.dateOfBirth ? ` · ${player.dateOfBirth}` : ""}</strong></span>
         <span><b>Position</b><strong>{player.positions.join(" / ") || "Unknown"}</strong></span>
-        <span><b>Preferred foot</b><strong>Unknown</strong></span>
+        <span><b>Preferred foot</b><strong>{player.preferredFoot ?? "Unknown"}</strong></span>
         <span><b>Value</b><strong>{player.value ?? "Unknown"}</strong></span>
         <span><b>Wage</b><strong>{player.wage ?? "Unknown"}</strong></span>
         <span><b>Contract</b><strong>{player.contractStatus ?? "Unknown"}</strong></span>
-        <span className="fact-confidence"><b>Scout confidence</b><UnknownRing /></span>
+        <span className="fact-confidence"><b>Knowledge</b>{player.scoutConfidence == null ? <strong>Unknown</strong> : <ConfidenceRing value={player.scoutConfidence} size="sm" />}</span>
       </section>
 
       <Tabs defaultValue="overview" className="dossier-tabs">
         <TabsList variant="line">
-          {["overview", "tactical", "attributes", "performance", "career", "reports", "notes"].map((value) => (
+          {["overview", "tactical", "attributes", "performance", "career"].map((value) => (
             <TabsTrigger key={value} value={value}>
               {value === "tactical" ? "Tactical fit" : value[0].toUpperCase() + value.slice(1)}
             </TabsTrigger>
@@ -111,23 +180,22 @@ export function PlayerProfileScreen({
               <section className="dossier-panel scout-summary-panel">
                 <header><UserRound /><h2>Scout summary</h2></header>
                 <p>
-                  Live memory confirms <strong>{player.name}</strong> belongs to {club?.name ?? "the current club"} and is familiar with {player.positions.join(", ") || "an unknown position"}.
-                  Age, nationality, attributes, form, contract, wage and valuation are not mapped for this FM26 build, so GlassScout does not produce an ability or recruitment recommendation.
+                  GlassScout identifies <strong>{player.name}</strong> ({player.nationality ?? "nationality unknown"}, age {player.age ?? "unknown"}) at {clubName ?? "an unmapped club"}.
                 </p>
                 <div className="summary-columns">
-                  <div><h3><CheckCircle2 />Strengths</h3><span>Unknown — no visible attribute evidence</span></div>
-                  <div><h3><AlertCircle />Weaknesses</h3><span>Unknown — no visible attribute evidence</span></div>
-                  <div><h3><ClipboardList />Recommended next action</h3><span>Collect a visibility-safe scout report before making a decision.</span></div>
+                  <div><h3><CheckCircle2 />Strengths</h3><span>{player.strengths.length ? player.strengths.join(" · ") : "No visible evidence"}</span></div>
+                  <div><h3><AlertCircle />Weaknesses</h3><span>{player.weaknesses.length ? player.weaknesses.join(" · ") : "No visible evidence"}</span></div>
+                  <div><h3><ClipboardList />Recommended next action</h3><span>{snapshot.tactic ? "Review live formation-specific fit." : "Keep scouting while the live tactic layout is validated."}</span></div>
                 </div>
               </section>
 
               <section className="dossier-panel role-fit-panel">
-                <header><MapPinned /><h2>Role & tactical fit</h2></header>
+                <header><MapPinned /><h2>{snapshot.tactic ? "Role & tactical fit" : "Role evidence"}</h2></header>
                 <div className="role-fit-layout">
                   <div className="role-fit-metrics">
                     <span><small>Best role</small><strong>{player.bestRole ?? "Unknown"}</strong></span>
-                    <span><small>Fit range</small><strong>{player.roleFit == null ? "Unknown" : `${player.roleFit}%`}</strong></span>
-                    <span><small>Scout confidence</small><strong>Unknown</strong></span>
+                    <span><small>{snapshot.tactic ? "Tactical fit" : "Role evidence"}</small><strong>{player.roleFit == null ? "Unknown" : `${player.roleFit}%`}</strong></span>
+                    <span><small>Knowledge</small><strong>{player.scoutConfidence == null ? "Unknown" : `${player.scoutConfidence}%`}</strong></span>
                   </div>
                   <div className="mini-role-map">
                     <span className="mini-box left" /><span className="mini-box right" /><span className="mini-half" /><span className="mini-centre" />
@@ -140,19 +208,23 @@ export function PlayerProfileScreen({
                     <span><i data-tone="low" />Low fit</span>
                   </div>
                 </div>
+                <RoleFitCards player={player} limit={5} />
               </section>
 
               <section className="dossier-panel attribute-evidence-panel">
                 <header><BarChart3 /><h2>Attribute evidence</h2><span>Visible values only</span></header>
-                <div className="attribute-grid">
+                <div className="attribute-grid attribute-grid-five">
                   <AttributeGroup title="Technical" names={technicalAttributes} player={player} />
                   <AttributeGroup title="Mental" names={mentalAttributes} player={player} />
                   <AttributeGroup title="Physical" names={physicalAttributes} player={player} />
+                  <AttributeGroup title="Set pieces" names={setPieceAttributes} player={player} />
+                  <AttributeGroup title="Goalkeeping" names={goalkeepingAttributes} player={player} />
                 </div>
               </section>
             </div>
 
             <aside className="dossier-side-column">
+              <PlayerPolygram player={player} />
               <section className="dossier-panel knowledge-panel">
                 <header><CircleHelp /><h2>Knowledge profile</h2></header>
                 <div className="knowledge-overview">
@@ -164,9 +236,9 @@ export function PlayerProfileScreen({
                   </div>
                 </div>
                 <dl>
-                  <div><dt>Last scouted</dt><dd>Unknown</dd></div>
+                  <div><dt>Last scouted</dt><dd>{player.lastScoutedDate ?? "Unknown"}</dd></div>
                   <div><dt>Observations</dt><dd>Unknown</dd></div>
-                  <div><dt>Report reliability</dt><dd>Unknown</dd></div>
+                  <div><dt>Report reliability</dt><dd>{player.reportReliability ?? "Unknown"}</dd></div>
                 </dl>
               </section>
 
@@ -182,7 +254,7 @@ export function PlayerProfileScreen({
                 <div className="form-bars">{Array.from({ length: 10 }, (_, index) => <i key={index} />)}</div>
                 <span><small>Current form</small><strong>{player.averageRating?.toFixed(2) ?? "Unknown"}</strong></span>
                 <div className="career-stats">
-                  <span><small>Appearances</small><strong>Unknown</strong></span>
+                  <span><small>Minutes</small><strong>{player.minutesPlayed ?? "Unknown"}</strong></span>
                   <span><small>Goals</small><strong>{player.goals ?? "Unknown"}</strong></span>
                   <span><small>Assists</small><strong>{player.assists ?? "Unknown"}</strong></span>
                 </div>
@@ -191,21 +263,61 @@ export function PlayerProfileScreen({
 
               <section className="dossier-panel decision-panel">
                 <header><ClipboardList /><h2>Decision history</h2></header>
-                <div><span>No visibility-safe decisions recorded</span></div>
+                <div><span>No scouting decisions recorded</span></div>
               </section>
             </aside>
           </div>
         </TabsContent>
 
-        {["tactical", "attributes", "performance", "career", "reports", "notes"].map((value) => (
-          <TabsContent value={value} key={value}>
-            <section className="dossier-locked-state">
-              <ShieldAlert />
-              <h2>{value === "tactical" ? "Tactical fit" : value[0].toUpperCase() + value.slice(1)} evidence is not available</h2>
-              <p>GlassScout will populate this section only from FM26 data that is visible to the user’s club.</p>
-            </section>
-          </TabsContent>
-        ))}
+        <TabsContent value="tactical">
+          <section className="dossier-panel tab-evidence-panel">
+            <header><MapPinned /><h2>In possession / out of possession evidence</h2></header>
+            <div className="role-phase-grid">
+              <article><small>Best mapped FM26 role</small><strong>{player.bestRole ?? "Role unknown"}</strong><p>{player.roleFit == null ? "Not enough mapped evidence." : `${player.roleFit}/100 from position familiarity and mapped attributes.`}</p></article>
+              <article><small>In possession</small><strong>{player.inPossessionFit == null ? "Unknown" : `${player.inPossessionFit}/100`}</strong><p>Mapped from the local FM Dossier role-phase index when available.</p></article>
+              <article><small>Out of possession</small><strong>{player.outOfPossessionFit == null ? "Unknown" : `${player.outOfPossessionFit}/100`}</strong><p>Mapped separately from the out-of-possession role-phase index when available.</p></article>
+              <article><small>Combined recommendation</small><strong>{player.recommendation?.minimum == null ? "Not enough evidence" : player.recommendation.minimum === player.recommendation.maximum ? player.recommendation.minimum : `${player.recommendation.minimum}–${player.recommendation.maximum}`}</strong><p>{(player.recommendation?.completeness ?? 0) >= 95 ? "Exact score from complete visible evidence." : "Partial observations produce an interval, never a false exact score."}</p></article>
+            </div>
+            <RoleFitCards player={player} />
+          </section>
+        </TabsContent>
+        <TabsContent value="attributes">
+          <section className="dossier-panel tab-evidence-panel">
+            <header><BarChart3 /><h2>Attribute profile</h2><span>{mappedAttributeCount} visible values</span></header>
+            <div className="attribute-grid attribute-grid-five">
+              <AttributeGroup title="Technical" names={technicalAttributes} player={player} />
+              <AttributeGroup title="Mental" names={mentalAttributes} player={player} />
+              <AttributeGroup title="Physical" names={physicalAttributes} player={player} />
+              <AttributeGroup title="Set pieces" names={setPieceAttributes} player={player} />
+              <AttributeGroup title="Goalkeeping" names={goalkeepingAttributes} player={player} />
+            </div>
+          </section>
+        </TabsContent>
+        <TabsContent value="performance">
+          <section className="dossier-panel tab-evidence-panel">
+            <header><BarChart3 /><h2>Performance and per 90</h2></header>
+            <div className="performance-grid">
+              {Object.entries({ "Average rating": player.averageRating, Minutes: player.minutesPlayed, Goals: player.goals, Assists: player.assists, ...player.per90 }).map(([label, value]) => (
+                <article key={label}><small>{metricLabel(label)}</small><strong>{metricValue(metricLabel(label), value)}</strong></article>
+              ))}
+            </div>
+            <p className="evidence-caption">Only competition and per-90 values read from club-visible FM26 structures appear here.</p>
+          </section>
+        </TabsContent>
+        <TabsContent value="career">
+          <section className="dossier-panel tab-evidence-panel">
+            <header><BarChart3 /><h2>Career history</h2><span>Mapped totals</span></header>
+            <div className="performance-grid">
+              {Object.entries(player.careerTotals ?? {}).map(([label, value]) => (
+                <article key={label}><small>{metricLabel(label)}</small><strong>{metricValue(metricLabel(label), value)}</strong></article>
+              ))}
+              <article><small>Signed</small><strong>{player.signDate ?? "Unknown"}</strong></article>
+              <article><small>Contract start</small><strong>{player.contractStartDate ?? "Unknown"}</strong></article>
+              <article><small>Remaining</small><strong>{player.contractRemaining ?? "Unknown"}</strong></article>
+            </div>
+            <p className="evidence-caption">Season-by-season timeline is shown only when that structure is mapped; these totals come from the local FM26 save index.</p>
+          </section>
+        </TabsContent>
       </Tabs>
     </main>
   );

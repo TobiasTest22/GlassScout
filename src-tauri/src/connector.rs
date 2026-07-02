@@ -1,7 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tauri::Emitter;
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
@@ -9,12 +8,27 @@ use std::{
     path::Path,
     sync::{OnceLock, RwLock},
 };
+use tauri::Emitter;
 
-const READ_ONLY_PROCESS_ACCESS: u32 = 0x1410;
-const MAX_STRING_BYTES: usize = 192;
-const POSITION_NAMES: [&str; 13] = [
-    "GK", "SW", "DL", "DC", "DR", "DM", "WBL", "MC", "WBR", "AML", "AMR", "AMC", "ST",
-];
+use crate::{
+    data::players::{IndexedPlayerRecord, PlayerDatabaseIndex},
+    fm26::{
+        memory::{ModuleInfo, ProcessReader},
+        offsets::{find_entity_map, mapping_coverage, EntityMapProfile, MappingCoverage},
+        parser::{preferred_foot_label, visible_attribute_map},
+        permissions::{can_write_memory, READ_ONLY_PROCESS_ACCESS_LABEL},
+        process::find_fm26_process,
+        roles::{
+            decode_role_duty_mask, duty_definition_for_mask, evaluate_player_roles,
+            role_catalogue_status, role_definition_for_mask, role_supports_slot,
+        },
+        scanner::{parse_pattern, scan_module, scan_private_memory_for_pointers},
+        structs::{FmDate, PLAYER_ATTRIBUTE_NAMES, POSITION_NAMES},
+        tactics::tactic_formation_template,
+        validator,
+    },
+    fm_dossier,
+};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +61,8 @@ pub struct ConnectorStatus {
     module_base: Option<String>,
     entity_map_status: &'static str,
     entity_map_profile_id: Option<String>,
+    mapping_schema_version: u32,
+    mapping_coverage: Vec<MappingCoverage>,
     pointer_validation: &'static str,
     handle_access_flags: &'static str,
     entity_root: Option<String>,
@@ -54,6 +70,7 @@ pub struct ConnectorStatus {
     managed_club_pointer: Option<String>,
     player_collection_pointer: Option<String>,
     live_memory_tactic_read: &'static str,
+    tactic_manager_pointer: Option<String>,
     failure_stage: Option<String>,
     last_successful_read: Option<String>,
     windows_error_code: Option<u32>,
@@ -72,9 +89,6 @@ pub struct ConnectorSnapshot {
     players: Vec<Value>,
     tactic: Option<Value>,
     tactic_source: &'static str,
-    tactic_file_status: &'static str,
-    tactic_file_name: Option<String>,
-    tactic_file_warnings: Vec<String>,
     data_error: Option<String>,
     data_source: &'static str,
     data_warnings: Vec<String>,
@@ -86,61 +100,6 @@ struct ExecutableIdentity {
     product_version: Option<String>,
     sha256: Option<String>,
     architecture: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EntityMapIndex {
-    schema_version: u32,
-    profiles: Vec<EntityMapProfile>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EntityMapProfile {
-    id: String,
-    file_version: String,
-    product_version: String,
-    executable_sha256: String,
-    architecture: String,
-    module: String,
-    signatures: Vec<EntitySignature>,
-    pointer_chains: Vec<PointerChain>,
-    constants: MapConstants,
-}
-
-#[derive(Deserialize)]
-struct EntitySignature {
-    name: String,
-    pattern: String,
-}
-
-#[derive(Deserialize)]
-struct PointerChain {
-    name: String,
-    root: String,
-    offsets: Vec<u64>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MapConstants {
-    manager_registry_vector_offset: u64,
-    human_person_offset: u64,
-    person_first_name_offset: u64,
-    person_second_name_offset: u64,
-    person_common_name_offset: u64,
-    person_contract_offset: u64,
-    contract_team_offset: u64,
-    team_vtable_rva: u64,
-    team_club_offset: u64,
-    team_players_start_offset: u64,
-    team_players_end_offset: u64,
-    club_vtable_rva: u64,
-    club_name_offset: u64,
-    entity_uid_offset: u64,
-    player_person_offset: u64,
-    player_positions_offset: u64,
 }
 
 #[derive(Default)]
@@ -155,29 +114,16 @@ struct ExtractionDiagnostics {
 struct LiveData {
     managed_club_id: String,
     manager_name: String,
+    season: Option<String>,
     clubs: Vec<Value>,
     players: Vec<Value>,
+    tactic: Option<Value>,
     database_players_indexed: u32,
     background_players_indexed: u32,
     database_index_status: &'static str,
     database_scope: &'static str,
     warnings: Vec<String>,
-}
-
-#[derive(Clone)]
-struct IndexedPlayerRecord {
-    id: String,
-    name: String,
-    positions: Vec<String>,
-    managed_squad: bool,
-    visibility_safe: bool,
-}
-
-#[derive(Default)]
-struct PlayerDatabaseIndex {
-    process_id: u32,
-    save_pointer: u64,
-    records: HashMap<String, IndexedPlayerRecord>,
+    tactic_manager_pointer: Option<u64>,
 }
 
 static PLAYER_DATABASE_INDEX: OnceLock<RwLock<PlayerDatabaseIndex>> = OnceLock::new();
@@ -218,10 +164,11 @@ pub fn load_active_save(app: tauri::AppHandle) -> ConnectorSnapshot {
 
 #[tauri::command]
 pub fn search_indexed_players(query: String) -> Vec<Value> {
-    let normalized = query.trim().to_lowercase();
-    if normalized.is_empty() {
-        return Vec::new();
+    let dossier_results = fm_dossier::search_players(&query, 500);
+    if !dossier_results.is_empty() {
+        return dossier_results;
     }
+    let normalized = query.trim().to_lowercase();
     let Some(index) = PLAYER_DATABASE_INDEX.get() else {
         return Vec::new();
     };
@@ -229,28 +176,163 @@ pub fn search_indexed_players(query: String) -> Vec<Value> {
         return Vec::new();
     };
     let _identity = (index.process_id, index.save_pointer);
-    index
+    let mut results: Vec<Value> = index
         .records
         .values()
-        .filter(|record| record.visibility_safe)
         .filter(|record| {
-            record.name.to_lowercase().contains(&normalized)
+            normalized.is_empty()
+                || record.name.to_lowercase().contains(&normalized)
                 || record
                     .positions
                     .iter()
                     .any(|position| position.to_lowercase().contains(&normalized))
         })
-        .take(100)
-        .map(|record| {
-            json!({
-                "id": record.id,
-                "name": record.name,
-                "positions": record.positions,
-                "managedSquad": record.managed_squad,
-                "visibility": "club-visible"
-            })
-        })
+        .map(indexed_player_json)
+        .collect();
+    results.sort_by(|left, right| {
+        left["name"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(right["name"].as_str().unwrap_or_default())
+    });
+    results.truncate(500);
+    results
+}
+
+#[tauri::command]
+pub fn indexed_players_by_ids(player_ids: Vec<String>) -> Vec<Value> {
+    let dossier_results = fm_dossier::players_by_ids(&player_ids);
+    if !dossier_results.is_empty() {
+        return dossier_results;
+    }
+    let Some(index) = PLAYER_DATABASE_INDEX.get() else {
+        return Vec::new();
+    };
+    let Ok(index) = index.read() else {
+        return Vec::new();
+    };
+    player_ids
+        .iter()
+        .filter_map(|id| index.records.get(id))
+        .map(indexed_player_json)
         .collect()
+}
+
+#[tauri::command]
+pub fn indexed_player_profile(player_id: String) -> Option<Value> {
+    fm_dossier::player_profile(&player_id)
+}
+
+fn indexed_player_json(record: &IndexedPlayerRecord) -> Value {
+    json!({
+        "id": record.id,
+        "name": record.name,
+        "positions": record.positions,
+        "managedSquad": record.managed_squad,
+        "visibility": if record.visibility_safe { "known" } else { "unknown" },
+        "scoutKnowledge": if record.visibility_safe { "fully_known" } else { "unknown" },
+        "scoutConfidence": if record.visibility_safe { 100 } else { 0 }
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MappingLabWindow {
+    pub(crate) object: &'static str,
+    pub(crate) base_address: String,
+    pub(crate) bytes: Vec<u8>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MappingLabCaptureData {
+    pub(crate) player_id: String,
+    pub(crate) player_name: String,
+    pub(crate) process_id: u32,
+    pub(crate) save_pointer: String,
+    pub(crate) entity_map_profile_id: String,
+    pub(crate) executable_sha256: String,
+    pub(crate) windows: Vec<MappingLabWindow>,
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn capture_mapping_lab_player(
+    player_id: &str,
+    window_size: usize,
+) -> Result<MappingLabCaptureData, String> {
+    let window_size = window_size.clamp(64, 4096);
+    let index = PLAYER_DATABASE_INDEX
+        .get()
+        .ok_or_else(|| "Load the active save before capturing mapping evidence.".to_string())?
+        .read()
+        .map_err(|_| "The live player index is unavailable.".to_string())?;
+    let record = index
+        .records
+        .get(player_id)
+        .cloned()
+        .or_else(|| {
+            let mut matches = index
+                .records
+                .values()
+                .filter(|record| record.name.eq_ignore_ascii_case(player_id));
+            let first = matches.next()?.clone();
+            matches.next().is_none().then_some(first)
+        })
+        .ok_or_else(|| {
+            "No unique indexed player matched that FM ID or exact player name.".to_string()
+        })?;
+    let process_id = index.process_id;
+    let save_pointer = index.save_pointer;
+    drop(index);
+
+    let mut reader = ProcessReader::open(process_id)
+        .map_err(|code| format!("Read-only FM26 access failed with Windows error {code}."))?;
+    let process_path = reader
+        .process_path()
+        .ok_or_else(|| "The FM26 executable path could not be read.".to_string())?;
+    let identity = read_executable_identity(&process_path);
+    let profile = find_entity_map(
+        identity.file_version.as_deref(),
+        identity.product_version.as_deref(),
+        identity.sha256.as_deref(),
+        identity.architecture.as_deref(),
+    )
+    .ok_or_else(|| "The running FM26 build does not match an exact entity map.".to_string())?;
+    let mut targets = vec![
+        ("player", record.raw_player_address),
+        ("person", record.person_address),
+    ];
+    if let Some(contract) = record.contract_address {
+        targets.push(("contract", contract));
+    }
+    let mut windows = Vec::with_capacity(targets.len());
+    for (object, address) in targets {
+        let bytes = reader
+            .read_bytes(address, window_size)
+            .ok_or_else(|| format!("The bounded {object} window was not readable."))?;
+        windows.push(MappingLabWindow {
+            object,
+            base_address: hex_address(address),
+            bytes,
+        });
+    }
+    Ok(MappingLabCaptureData {
+        player_id: record.id,
+        player_name: record.name,
+        process_id,
+        save_pointer: hex_address(save_pointer),
+        entity_map_profile_id: profile.id.clone(),
+        executable_sha256: identity.sha256.unwrap_or_default(),
+        windows,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn capture_mapping_lab_player(
+    _player_id: &str,
+    _window_size: usize,
+) -> Result<MappingLabCaptureData, String> {
+    Err("The FM26 mapping lab requires Windows.".to_string())
 }
 
 fn empty_status() -> ConnectorStatus {
@@ -275,7 +357,7 @@ fn empty_status() -> ConnectorStatus {
         last_sync: None,
         bytes_read: 0,
         executable_header_valid: false,
-        can_write_memory: false,
+        can_write_memory: can_write_memory(),
         game_build: None,
         product_version: None,
         executable_sha256: None,
@@ -283,13 +365,16 @@ fn empty_status() -> ConnectorStatus {
         module_base: None,
         entity_map_status: "not_checked",
         entity_map_profile_id: None,
+        mapping_schema_version: 2,
+        mapping_coverage: Vec::new(),
         pointer_validation: "not_run",
-        handle_access_flags: "PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ (0x1410)",
+        handle_access_flags: READ_ONLY_PROCESS_ACCESS_LABEL,
         entity_root: None,
         save_pointer: None,
         managed_club_pointer: None,
         player_collection_pointer: None,
-        live_memory_tactic_read: "disabled",
+        live_memory_tactic_read: "not_run",
+        tactic_manager_pointer: None,
         failure_stage: None,
         last_successful_read: None,
         windows_error_code: None,
@@ -308,9 +393,6 @@ fn empty_snapshot(status: ConnectorStatus, error: String) -> ConnectorSnapshot {
         players: Vec::new(),
         tactic: None,
         tactic_source: "none",
-        tactic_file_status: "not_imported",
-        tactic_file_name: None,
-        tactic_file_warnings: Vec::new(),
         data_error: Some(error),
         data_source: "none",
         data_warnings: Vec::new(),
@@ -363,7 +445,12 @@ fn collect_snapshot(
     status.executable_sha256 = identity.sha256.clone();
     status.architecture = identity.architecture.clone();
 
-    let Some(profile) = find_entity_map(&identity) else {
+    let Some(profile) = find_entity_map(
+        identity.file_version.as_deref(),
+        identity.product_version.as_deref(),
+        identity.sha256.as_deref(),
+        identity.architecture.as_deref(),
+    ) else {
         status.state = "parser_unverified";
         status.entity_map_status = "missing";
         status.failure_stage = Some("exact_build_match".to_string());
@@ -377,6 +464,7 @@ fn collect_snapshot(
     };
     status.entity_map_status = "matched";
     status.entity_map_profile_id = Some(profile.id.clone());
+    status.mapping_coverage = mapping_coverage(profile);
 
     let Some(module) = reader.module(&profile.module) else {
         status.state = "parser_unverified";
@@ -436,12 +524,20 @@ fn collect_snapshot(
             status.database_players_indexed = data.database_players_indexed;
             status.background_players_indexed = data.background_players_indexed;
             status.visible_players_loaded = data.players.len() as u32;
-            status.fully_scouted_players = 0;
+            status.fully_scouted_players = data.players.len() as u32;
             status.partial_scout_reports = 0;
             status.database_index_status = data.database_index_status;
             status.database_scope = data.database_scope;
             status.clubs_loaded = data.clubs.len() as u32;
             status.pointer_validation = "passed";
+            status.live_memory_tactic_read = if data.tactic.is_some() {
+                "ready"
+            } else if data.tactic_manager_pointer.is_some() {
+                "object_detected_unmapped"
+            } else {
+                "object_not_found"
+            };
+            status.tactic_manager_pointer = data.tactic_manager_pointer.map(hex_address);
             status.last_sync = Some(unix_milliseconds());
             status.message = format!(
                 "Connected to {} with {} live squad players and {} indexed player records.",
@@ -458,14 +554,15 @@ fn collect_snapshot(
                 status,
                 managed_club_id: Some(data.managed_club_id),
                 manager_name: Some(data.manager_name),
-                season: None,
+                season: data.season,
                 clubs: data.clubs,
                 players: data.players,
-                tactic: None,
-                tactic_source: "none",
-                tactic_file_status: "not_imported",
-                tactic_file_name: None,
-                tactic_file_warnings: Vec::new(),
+                tactic_source: if data.tactic.is_some() {
+                    "live-memory"
+                } else {
+                    "none"
+                },
+                tactic: data.tactic,
                 data_error: None,
                 data_source: "live-memory",
                 data_warnings: data.warnings,
@@ -511,8 +608,11 @@ fn extract_live_data(
         .ok_or_else(|| {
             ExtractionFailure::new("manager_signature", "The exact build map is incomplete.")
         })?;
-    let pattern = parse_pattern(&signature.pattern)?;
-    let hits = reader.scan_module(module, &pattern)?;
+    let pattern = parse_pattern(&signature.pattern).map_err(|_| {
+        ExtractionFailure::new("entity_map", "The embedded signature pattern is invalid.")
+    })?;
+    let hits = scan_module(reader, module, &pattern)
+        .map_err(|error| ExtractionFailure::new("manager_signature", error.to_string()))?;
     if hits.len() != 1 {
         return Err(ExtractionFailure::new(
             "manager_signature",
@@ -605,12 +705,12 @@ fn extract_live_data(
                 "The managed FM26 team could not be resolved.",
             )
         })?;
-    validate_vtable(
+    validator::validate_vtable(
         reader,
         team,
         module.base + profile.constants.team_vtable_rva,
-        "managed_team",
-    )?;
+    )
+    .map_err(|message| ExtractionFailure::new("managed_team", message))?;
     let club = reader
         .read_pointer(team + profile.constants.team_club_offset)
         .filter(|value| *value != 0)
@@ -620,12 +720,12 @@ fn extract_live_data(
                 "The managed FM26 club could not be resolved.",
             )
         })?;
-    validate_vtable(
+    validator::validate_vtable(
         reader,
         club,
         module.base + profile.constants.club_vtable_rva,
-        "managed_club",
-    )?;
+    )
+    .map_err(|message| ExtractionFailure::new("managed_club", message))?;
     diagnostics.managed_club_pointer = Some(club);
     diagnostics.last_successful_read = Some("validate_managed_club".to_string());
     if let Some(progress) = progress {
@@ -761,8 +861,82 @@ fn extract_live_data(
                 positions.push(POSITION_NAMES[position].to_string());
             }
         }
-        let calculated_position = positions.first().cloned();
+        let calculated_position = position_bytes
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, rating)| **rating)
+            .map(|(position, _)| POSITION_NAMES[position].to_string());
+        let birth_date = read_fm_date(reader, person + profile.constants.person_birth_date_offset);
+        let current_date = read_fm_date(
+            reader,
+            raw_player + profile.constants.player_current_date_offset,
+        );
+        let age = birth_date
+            .zip(current_date)
+            .and_then(|(birth, current)| calculate_age(birth, current));
+        let date_of_birth = birth_date.and_then(format_fm_date);
+        let season = current_date.map(|date| {
+            let next_year = date.year.saturating_add(1);
+            format!("{}/{}", date.year, next_year % 100)
+        });
+        let nationality = read_nationality(reader, person, profile);
+        let attribute_bytes = reader
+            .read_bytes(
+                raw_player + profile.constants.player_attributes_offset,
+                PLAYER_ATTRIBUTE_NAMES.len(),
+            )
+            .ok_or_else(|| {
+                ExtractionFailure::new(
+                    "player_attributes",
+                    "A managed squad attribute record was not readable.",
+                )
+            })?;
+        if attribute_bytes.iter().any(|value| *value > 100) {
+            return Err(ExtractionFailure::new(
+                "player_attributes",
+                "A managed squad attribute record failed its 1–100 storage bounds check.",
+            ));
+        }
+        let visible_attributes = visible_attribute_map(&attribute_bytes);
+        let preferred_foot = preferred_foot_label(attribute_bytes[24], attribute_bytes[25]);
+        let role_evaluation = evaluate_player_roles(&position_bytes, &visible_attributes);
+        let best_role = role_evaluation
+            .best
+            .as_ref()
+            .map(|fit| fit.role.to_string());
+        let ability_score = role_evaluation
+            .best
+            .as_ref()
+            .map(|fit| fit.score)
+            .or_else(|| {
+                calculated_position
+                    .as_deref()
+                    .and_then(|position| visible_ability_score(position, &visible_attributes))
+            });
+        let (strengths, weaknesses) = attribute_evidence(&visible_attributes);
+        let validated_at = unix_milliseconds();
+        let attribute_knowledge: serde_json::Map<String, Value> = visible_attributes
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.clone(),
+                    json!({
+                        "value": value,
+                        "visibility": "known",
+                        "source": "own-squad",
+                        "confidence": 100,
+                        "lastValidated": validated_at
+                    }),
+                )
+            })
+            .collect();
+        let playable_roles = role_evaluation.playable;
+        let other_roles = role_evaluation.secondary;
+        let role_reasoning = role_evaluation.reasoning;
         let player_id = uid.to_string();
+        let contract_address = reader
+            .read_pointer(person + profile.constants.person_contract_offset)
+            .filter(|value| *value != 0);
         managed_player_ids.insert(player_id.clone());
         managed_index_records.push(IndexedPlayerRecord {
             id: player_id.clone(),
@@ -770,16 +944,23 @@ fn extract_live_data(
             positions: positions.clone(),
             managed_squad: true,
             visibility_safe: true,
+            raw_player_address: raw_player,
+            person_address: person,
+            contract_address,
         });
         players.push(json!({
             "id": player_id,
-            "name": name,
-            "age": null,
-            "nationality": null,
-            "positions": positions,
-            "bestRole": null,
+            "name": name.clone(),
+            "_season": season,
+            "age": age,
+            "dateOfBirth": date_of_birth,
+            "nationality": nationality.clone(),
+            "secondNationality": null,
+            "positions": positions.clone(),
+            "bestRole": best_role,
             "currentAbility": null,
             "potentialAbility": null,
+            "abilityScore": ability_score,
             "form": null,
             "averageRating": null,
             "minutesPlayed": null,
@@ -791,98 +972,176 @@ fn extract_live_data(
             "squadImportance": null,
             "developmentTrend": null,
             "tacticalFit": null,
-            "roleFit": null,
-            "strengths": [],
-            "weaknesses": [],
+            "roleFit": ability_score,
+            "playableRoles": playable_roles,
+            "otherRoles": other_roles,
+            "preferredFoot": preferred_foot,
+            "strengths": strengths,
+            "weaknesses": weaknesses,
             "clubId": club_id,
             "transferInterest": null,
             "loanInterest": null,
             "transferAvailable": null,
             "loanAvailable": null,
-            "attributes": {},
+            "attributes": visible_attributes,
             "per90": {},
-            "scoutKnowledge": "partly_known",
+            "scoutKnowledge": "fully_known",
+            "scoutConfidence": 100,
+            "lastScoutedDate": null,
+            "reportReliability": null,
             "bestCalculatedPosition": calculated_position,
             "truePrice": null,
             "fairPriceRange": null,
             "valuationLabel": "unavailable",
             "valuationReasoning": ["FM26 valuation fields are not mapped for this exact build."],
             "retrainingSuggestion": null,
-            "roleReasoning": ["Only live positional familiarity is currently validated for this build."],
+            "roleReasoning": role_reasoning,
             "riskLevel": "unknown",
             "marketValueAmount": null
+            ,"personality": null
+            ,"condition": null
+            ,"recommendation": {
+                "minimum": ability_score,
+                "maximum": ability_score,
+                "completeness": 100,
+                "label": if ability_score.is_some() { "full visible-attribute evidence" } else { "not enough evidence" }
+            }
+            ,"knowledge": {
+                "name": { "value": name, "visibility": "known", "source": "own-squad", "confidence": 100, "lastValidated": validated_at },
+                "age": { "value": age, "visibility": "known", "source": "own-squad", "confidence": 100, "lastValidated": validated_at },
+                "nationality": { "value": nationality, "visibility": "known", "source": "own-squad", "confidence": 100, "lastValidated": validated_at },
+                "positions": { "value": positions, "visibility": "known", "source": "own-squad", "confidence": 100, "lastValidated": validated_at },
+                "attributes": attribute_knowledge,
+                "form": { "value": null, "visibility": "unknown", "source": "memory-raw", "confidence": 0, "lastValidated": null },
+                "contract": { "value": null, "visibility": "unknown", "source": "memory-raw", "confidence": 0, "lastValidated": null },
+                "wage": { "value": null, "visibility": "unknown", "source": "memory-raw", "confidence": 0, "lastValidated": null },
+                "value": { "value": null, "visibility": "unknown", "source": "memory-raw", "confidence": 0, "lastValidated": null },
+                "interest": { "value": null, "visibility": "unknown", "source": "memory-raw", "confidence": 0, "lastValidated": null }
+            }
         }));
     }
     diagnostics.last_successful_read = Some("extract_managed_squad".to_string());
+    let managed_tactic_records = managed_index_records.clone();
 
-    let (database_players_indexed, background_players_indexed, database_index_status, database_scope) =
-        if include_database_index {
-            if let Some(progress) = progress {
-                progress("indexing_player_database");
-            }
-            let seed_vtable = player_vtable.ok_or_else(|| {
-                ExtractionFailure::new(
-                    "player_database",
-                    "The live squad did not provide a player type signature.",
-                )
-            })?;
-            match index_full_player_database(
-                reader,
-                profile,
-                process_id,
-                diagnostics.save_pointer.unwrap_or_default(),
-                seed_vtable,
-                &managed_player_ids,
-                managed_index_records,
-            ) {
-                Ok(indexed) => {
-                    if let Some(progress) = progress {
-                        progress("building_visibility_index");
-                    }
-                    diagnostics.last_successful_read =
-                        Some("index_full_player_database".to_string());
-                    (
-                        indexed.total,
-                        indexed.background,
-                        "ready",
-                        "full-save-index",
-                    )
-                }
-                Err(_) => (
-                    player_count as u32,
-                    0,
-                    "partial",
-                    "managed-squad",
-                ),
-            }
-        } else {
-            store_player_index(
-                process_id,
-                diagnostics.save_pointer.unwrap_or_default(),
-                managed_index_records,
-            );
-            (
-                player_count as u32,
-                0,
-                "not_run",
-                "managed-squad",
+    let (
+        database_players_indexed,
+        background_players_indexed,
+        database_index_status,
+        database_scope,
+        tactic_manager_pointer,
+    ) = if include_database_index {
+        if let Some(progress) = progress {
+            progress("indexing_player_database");
+        }
+        let seed_vtable = player_vtable.ok_or_else(|| {
+            ExtractionFailure::new(
+                "player_database",
+                "The live squad did not provide a player type signature.",
             )
-        };
+        })?;
+        match index_full_player_database(
+            reader,
+            profile,
+            process_id,
+            diagnostics.save_pointer.unwrap_or_default(),
+            seed_vtable,
+            module,
+            &managed_player_ids,
+            managed_index_records,
+        ) {
+            Ok(indexed) => {
+                if let Some(progress) = progress {
+                    progress("building_visibility_index");
+                }
+                diagnostics.last_successful_read = Some("index_full_player_database".to_string());
+                (
+                    indexed.total,
+                    indexed.background,
+                    "ready",
+                    "full-save-index",
+                    indexed.tactic_manager_pointer,
+                )
+            }
+            Err(_) => (player_count as u32, 0, "partial", "managed-squad", None),
+        }
+    } else {
+        store_player_index(
+            process_id,
+            diagnostics.save_pointer.unwrap_or_default(),
+            managed_index_records,
+        );
+        (player_count as u32, 0, "not_run", "managed-squad", None)
+    };
 
+    let season = players
+        .first()
+        .and_then(|player| player.get("_season"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    for player in &mut players {
+        if let Some(object) = player.as_object_mut() {
+            object.remove("_season");
+        }
+    }
+    let dossier_reference = fm_dossier::augment_live_players(&mut players);
+    let database_players_indexed = dossier_reference
+        .as_ref()
+        .map(|reference| database_players_indexed.max(reference.player_count))
+        .unwrap_or(database_players_indexed);
+    let background_players_indexed = dossier_reference
+        .as_ref()
+        .map(|reference| {
+            reference
+                .player_count
+                .saturating_sub(players.len().try_into().unwrap_or_default())
+                .max(background_players_indexed)
+        })
+        .unwrap_or(background_players_indexed);
+    let database_index_status = if dossier_reference.is_some() {
+        "ready"
+    } else {
+        database_index_status
+    };
+    let database_scope = if dossier_reference.is_some() {
+        "full-save-index"
+    } else {
+        database_scope
+    };
+    let tactic = tactic_manager_pointer
+        .and_then(|pointer| extract_live_tactic(reader, pointer, &managed_tactic_records));
     let mut warnings = vec![
-        "Player names and positional familiarity are live; age, attributes, form, contract, value, wage and performance fields remain unavailable for this exact map.".to_string(),
-        "Live-memory tactic reading is disabled. Tactic Evaluation uses only a user-selected local FMF file.".to_string(),
+        "Managed-squad IDs, names, dates of birth, ages, nationality, positions, preferred foot and visible attributes are validated for this FM26 build. Hidden CA/PA is never read or scored.".to_string(),
+        "FM26 role, duty and out-of-possession role catalogues are mapped from the current build metadata. Player playable-role scoring now uses mapped role metadata plus live attributes and position familiarity.".to_string(),
+        "Form, match ratings, contract, wage, valuation, fitness and squad-status relationships are not yet validated for this build and remain Unknown.".to_string(),
+        "Own-squad players are fully known. Wider-save records are indexed; exact unknown data stays unavailable unless FM scout reports expose it.".to_string(),
+        if tactic.is_some() {
+            "Live FM26 tactic formation and selected XI slots are mapped from the active tactic manager. Role/duty slot packets are published only if their FM26 masks validate against the live formation.".to_string()
+        } else {
+            "The live FM26 tactic manager is detected with read-only access, but the selected-slot block did not validate for this read. No tactic is guessed.".to_string()
+        },
         "The FM26 shortlist collection is not mapped safely. GlassScout Favorites remains a local list resolved against live players.".to_string(),
     ];
     if include_database_index && database_index_status == "ready" {
-        warnings.push(format!(
-            "{background_players_indexed} wider-save player records were indexed in memory. They remain hidden from the UI until FM scout-knowledge visibility can be validated."
-        ));
+        if dossier_reference.is_some() {
+            warnings.push(format!(
+                "{background_players_indexed} wider-save player records are available through the FM Dossier local save index. Scout-knowledge gates still decide what profile detail is shown."
+            ));
+        } else {
+            warnings.push(format!(
+                "{background_players_indexed} wider-save player records were indexed in memory. They remain hidden from the UI until FM scout-knowledge visibility can be validated."
+            ));
+        }
     } else if include_database_index {
         warnings.push(
             "The wider player database could not be indexed safely; only the managed squad is available."
                 .to_string(),
         );
+    }
+    if let Some(reference) = &dossier_reference {
+        warnings.push(format!(
+            "FM Dossier local save index enriched missing contract, wage, value, condition, history and search fields from {}. This is a local read-only reference layer while native offsets are mapped.",
+            reference.path.display()
+        ));
     }
     let clubs = vec![json!({
         "id": club_id,
@@ -893,28 +1152,427 @@ fn extract_live_data(
     Ok(LiveData {
         managed_club_id: club_uid.to_string(),
         manager_name,
+        season,
         clubs,
         players,
+        tactic,
         database_players_indexed,
         background_players_indexed,
         database_index_status,
         database_scope,
         warnings,
+        tactic_manager_pointer,
     })
+}
+
+#[cfg(target_os = "windows")]
+const TACTIC_FORMATION_CODE_OFFSET: u64 = 0x03D4;
+#[cfg(target_os = "windows")]
+const TACTIC_SELECTION_POINTER_OFFSETS: [u64; 3] = [0x41B8, 0x41C0, 0x41C8];
+
+#[cfg(target_os = "windows")]
+fn extract_live_tactic(
+    reader: &mut ProcessReader,
+    tactic_manager_pointer: u64,
+    managed_records: &[IndexedPlayerRecord],
+) -> Option<Value> {
+    let formation_code = reader.read_u32(tactic_manager_pointer + TACTIC_FORMATION_CODE_OFFSET)?;
+    let template = tactic_formation_template(formation_code)?;
+    let selection = find_live_tactic_selection(
+        reader,
+        tactic_manager_pointer,
+        managed_records,
+        template.positions.len(),
+    )?;
+    let managed_by_person = managed_records
+        .iter()
+        .map(|record| (record.person_address, record))
+        .collect::<HashMap<_, _>>();
+    let mut slots = Vec::with_capacity(template.positions.len());
+    let role_packet = find_live_tactic_role_packet(
+        reader,
+        tactic_manager_pointer,
+        &selection,
+        template.positions,
+    );
+
+    for (index, position) in template.positions.iter().enumerate() {
+        let person_pointer = selection.person_pointers[index];
+        let record = managed_by_person.get(&person_pointer).copied();
+        let role_slot = role_packet
+            .as_ref()
+            .and_then(|packet| packet.slots.get(index))
+            .copied();
+        slots.push(json!({
+            "playerId": record.map(|record| record.id.clone()),
+            "position": position,
+            "role": role_slot.and_then(|slot| slot.role_label),
+            "roleShort": role_slot.and_then(|slot| slot.role_short_label),
+            "roleMask": role_slot.and_then(|slot| slot.role_mask).map(|mask| format!("0x{mask:X}")),
+            "duty": role_slot.and_then(|slot| slot.duty_label),
+            "dutyShort": role_slot.and_then(|slot| slot.duty_short_label),
+            "dutyMask": role_slot.and_then(|slot| slot.duty_mask).map(|mask| format!("0x{mask:X}")),
+            "personPointer": if person_pointer == 0 { None } else { Some(hex_address(person_pointer)) },
+            "decoderStatus": match (record.is_some(), role_slot.and_then(|slot| slot.role_label).is_some(), role_slot.and_then(|slot| slot.duty_label).is_some()) {
+                (true, true, true) => "player-role-duty-validated",
+                (true, true, false) => "player-role-validated-duty-pending",
+                (true, false, _) => "player-slot-validated-role-pending",
+                _ => "player-slot-unresolved"
+            }
+        }));
+    }
+
+    let role_warning = match &role_packet {
+        Some(packet) if packet.duties_resolved == template.positions.len() => {
+            "Packed FM26 role and duty masks validated against the active tactic slots."
+        }
+        Some(_) => {
+            "Packed FM26 role masks validated against the active tactic slots; duty masks remain pending for this read."
+        }
+        None => {
+            "Packed role, duty, phase-layout and instruction codes did not validate on this read, so GlassScout does not invent them."
+        }
+    };
+    let warnings = if template.exact_shape {
+        vec![
+            "Formation and selected XI slots are decoded from live FM26 memory.",
+            role_warning,
+        ]
+    } else {
+        vec![
+            "The FM26 formation code is known, but this formation's exact pitch slot template is not validated yet.",
+            "Selected XI is decoded from live FM26 memory; pitch placement uses neutral slot labels until the formation template is mapped.",
+            role_warning,
+        ]
+    };
+    Some(json!({
+        "name": null,
+        "formation": template.label,
+        "formationEnum": template.enum_name,
+        "formationCode": formation_code,
+        "slots": slots,
+        "teamInstructions": [],
+        "playerInstructionsReadable": false,
+        "decoderStatus": match (&role_packet, template.exact_shape) {
+            (Some(packet), true) if packet.duties_resolved == template.positions.len() => "formation-selected-xi-role-duty-validated",
+            (Some(_), true) => "formation-selected-xi-role-validated",
+            (None, true) => "formation-shape-and-selected-xi-validated",
+            (Some(_), false) => "selected-xi-role-validated-template-pending",
+            (None, false) => "selected-xi-validated-template-pending",
+        },
+        "layoutStatus": if template.exact_shape { "exact-template" } else { "formation-name-only" },
+        "selectionPointer": hex_address(selection.base_address + selection.offset),
+        "selectionStride": selection.stride,
+        "selectionResolvedPlayers": selection.resolved_players,
+        "roleDutyDecoderStatus": role_packet.as_ref().map(|packet| packet.status).unwrap_or("packet-not-validated"),
+        "rolePacketPointer": role_packet.as_ref().map(|packet| hex_address(packet.base_address + packet.offset)),
+        "rolePacketStride": role_packet.as_ref().map(|packet| packet.stride),
+        "rolePacketWidth": role_packet.as_ref().map(|packet| packet.width),
+        "rolesResolved": role_packet.as_ref().map(|packet| packet.roles_resolved).unwrap_or_default(),
+        "dutiesResolved": role_packet.as_ref().map(|packet| packet.duties_resolved).unwrap_or_default(),
+        "roleCatalogue": role_catalogue_status(),
+        "warnings": warnings
+    }))
+}
+
+#[cfg(target_os = "windows")]
+struct TacticSelection {
+    base_address: u64,
+    offset: u64,
+    stride: u64,
+    person_pointers: Vec<u64>,
+    resolved_players: usize,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+struct TacticRoleSlot {
+    role_label: Option<&'static str>,
+    role_short_label: Option<&'static str>,
+    role_mask: Option<u64>,
+    duty_label: Option<&'static str>,
+    duty_short_label: Option<&'static str>,
+    duty_mask: Option<u64>,
+}
+
+#[cfg(target_os = "windows")]
+struct TacticRolePacket {
+    base_address: u64,
+    offset: u64,
+    stride: u64,
+    width: u64,
+    status: &'static str,
+    slots: Vec<TacticRoleSlot>,
+    roles_resolved: usize,
+    duties_resolved: usize,
+    compatible_roles: usize,
+}
+
+#[cfg(target_os = "windows")]
+fn find_live_tactic_role_packet(
+    reader: &mut ProcessReader,
+    tactic_manager_pointer: u64,
+    selection: &TacticSelection,
+    positions: &[&str],
+) -> Option<TacticRolePacket> {
+    let mut candidates = vec![tactic_manager_pointer, selection.base_address];
+    if let Some(bytes) = reader.read_bytes(tactic_manager_pointer, 0x2000) {
+        for offset in (0..bytes.len().saturating_sub(8)).step_by(8) {
+            let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().ok()?);
+            if plausible_process_pointer(pointer) {
+                candidates.push(pointer);
+            }
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+
+    let mut best: Option<TacticRolePacket> = None;
+    for base_address in candidates {
+        let Some(bytes) = read_bounded_window(reader, base_address) else {
+            continue;
+        };
+        for width in [8_u64, 4_u64] {
+            for stride in [width, 8, 0x10, 0x18, 0x20, 0x28, 0x30, 0x48, 0x50] {
+                if stride < width {
+                    continue;
+                }
+                let needed = (positions.len().saturating_sub(1) as u64)
+                    .saturating_mul(stride)
+                    .saturating_add(width) as usize;
+                if bytes.len() < needed {
+                    continue;
+                }
+                let max_start = bytes.len().saturating_sub(needed);
+                for start in (0..=max_start).step_by(4) {
+                    let Some(packet) = decode_role_packet_at(
+                        base_address,
+                        &bytes,
+                        start,
+                        stride,
+                        width,
+                        positions,
+                    ) else {
+                        continue;
+                    };
+                    let replace = best.as_ref().is_none_or(|current| {
+                        packet.roles_resolved > current.roles_resolved
+                            || (packet.roles_resolved == current.roles_resolved
+                                && packet.duties_resolved > current.duties_resolved)
+                            || (packet.roles_resolved == current.roles_resolved
+                                && packet.duties_resolved == current.duties_resolved
+                                && packet.compatible_roles > current.compatible_roles)
+                    });
+                    if replace {
+                        best = Some(packet);
+                    }
+                }
+            }
+        }
+    }
+    best
+}
+
+#[cfg(target_os = "windows")]
+fn decode_role_packet_at(
+    base_address: u64,
+    bytes: &[u8],
+    start: usize,
+    stride: u64,
+    width: u64,
+    positions: &[&str],
+) -> Option<TacticRolePacket> {
+    let mut slots = Vec::with_capacity(positions.len());
+    let mut roles_resolved = 0_usize;
+    let mut duties_resolved = 0_usize;
+    let mut compatible_roles = 0_usize;
+    let mut distinct_roles = HashSet::new();
+    let mut distinct_duties = HashSet::new();
+
+    for (index, position) in positions.iter().enumerate() {
+        let offset = start + (index as u64 * stride) as usize;
+        let value = read_packet_value(bytes, offset, width)?;
+        let decoded = decode_role_duty_mask(value);
+        if decoded.unknown_bits != 0 {
+            return None;
+        }
+        let role = decoded
+            .role
+            .or_else(|| role_definition_for_mask(value & u64::from(u32::MAX)));
+        let duty = decoded
+            .duty
+            .or_else(|| duty_definition_for_mask(value & u64::from(u32::MAX)));
+        if let Some(role) = role {
+            roles_resolved += 1;
+            distinct_roles.insert(role.key);
+            if role_supports_slot(role, position) {
+                compatible_roles += 1;
+            }
+        }
+        if let Some(duty) = duty {
+            duties_resolved += 1;
+            distinct_duties.insert(duty.key);
+        }
+        if role.is_none() && duty.is_none() {
+            return None;
+        }
+        slots.push(TacticRoleSlot {
+            role_label: role.map(|definition| definition.label),
+            role_short_label: role.map(|definition| definition.short_label),
+            role_mask: role.map(|definition| definition.mask),
+            duty_label: duty.map(|definition| definition.label),
+            duty_short_label: duty.map(|definition| definition.short_label),
+            duty_mask: duty.map(|definition| definition.mask),
+        });
+    }
+
+    if roles_resolved < positions.len() || compatible_roles < 7 || distinct_roles.len() < 3 {
+        return None;
+    }
+    let status = if duties_resolved == positions.len() && distinct_duties.len() >= 2 {
+        "role-duty-packet-validated"
+    } else if duties_resolved == 0 {
+        "role-packet-validated-duty-pending"
+    } else {
+        "role-packet-validated-partial-duty"
+    };
+    Some(TacticRolePacket {
+        base_address,
+        offset: start as u64,
+        stride,
+        width,
+        status,
+        slots,
+        roles_resolved,
+        duties_resolved,
+        compatible_roles,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn read_packet_value(bytes: &[u8], offset: usize, width: u64) -> Option<u64> {
+    match width {
+        4 => bytes
+            .get(offset..offset + 4)
+            .and_then(|slice| slice.try_into().ok())
+            .map(u32::from_le_bytes)
+            .map(u64::from),
+        8 => bytes
+            .get(offset..offset + 8)
+            .and_then(|slice| slice.try_into().ok())
+            .map(u64::from_le_bytes),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn find_live_tactic_selection(
+    reader: &mut ProcessReader,
+    tactic_manager_pointer: u64,
+    managed_records: &[IndexedPlayerRecord],
+    slot_count: usize,
+) -> Option<TacticSelection> {
+    let managed_people = managed_records
+        .iter()
+        .map(|record| record.person_address)
+        .collect::<HashSet<_>>();
+    let mut candidates = Vec::new();
+    candidates.push(tactic_manager_pointer);
+    for pointer_offset in TACTIC_SELECTION_POINTER_OFFSETS {
+        if let Some(pointer) = reader
+            .read_pointer(tactic_manager_pointer + pointer_offset)
+            .filter(|pointer| plausible_process_pointer(*pointer))
+        {
+            candidates.push(pointer);
+        }
+    }
+    if let Some(bytes) = reader.read_bytes(tactic_manager_pointer, 0x6000) {
+        for offset in (0..bytes.len().saturating_sub(8)).step_by(8) {
+            let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().ok()?);
+            if plausible_process_pointer(pointer) {
+                candidates.push(pointer);
+            }
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+
+    let mut best: Option<TacticSelection> = None;
+    for base_address in candidates {
+        let Some(bytes) = read_bounded_window(reader, base_address) else {
+            continue;
+        };
+        for stride in [8_u64, 0x48] {
+            let needed = (slot_count.saturating_sub(1) as u64)
+                .saturating_mul(stride)
+                .saturating_add(8) as usize;
+            if bytes.len() < needed {
+                continue;
+            }
+            let max_start = bytes.len().saturating_sub(needed);
+            for start in (0..=max_start).step_by(8) {
+                let mut pointers = Vec::with_capacity(slot_count);
+                let mut resolved = 0_usize;
+                let mut plausible = 0_usize;
+                for index in 0..slot_count {
+                    let offset = start + (index as u64 * stride) as usize;
+                    let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().ok()?);
+                    if plausible_process_pointer(pointer) {
+                        plausible += 1;
+                    }
+                    if managed_people.contains(&pointer) {
+                        resolved += 1;
+                    }
+                    pointers.push(pointer);
+                }
+                if resolved < 8 || plausible < 10 {
+                    continue;
+                }
+                let replace = best
+                    .as_ref()
+                    .is_none_or(|current| resolved > current.resolved_players);
+                if replace {
+                    best = Some(TacticSelection {
+                        base_address,
+                        offset: start as u64,
+                        stride,
+                        person_pointers: pointers,
+                        resolved_players: resolved,
+                    });
+                    if resolved == slot_count {
+                        return best;
+                    }
+                }
+            }
+        }
+    }
+    best
+}
+
+#[cfg(target_os = "windows")]
+fn read_bounded_window(reader: &mut ProcessReader, base_address: u64) -> Option<Vec<u8>> {
+    for size in [0x4000_usize, 0x2000, 0x1000] {
+        if let Some(bytes) = reader.read_bytes(base_address, size) {
+            return Some(bytes);
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn plausible_process_pointer(pointer: u64) -> bool {
+    (0x10000000000..0x0000_8000_0000_0000).contains(&pointer)
 }
 
 #[cfg(target_os = "windows")]
 struct IndexSummary {
     total: u32,
     background: u32,
+    tactic_manager_pointer: Option<u64>,
 }
 
 #[cfg(target_os = "windows")]
-fn store_player_index(
-    process_id: u32,
-    save_pointer: u64,
-    records: Vec<IndexedPlayerRecord>,
-) {
+fn store_player_index(process_id: u32, save_pointer: u64, records: Vec<IndexedPlayerRecord>) {
     let records = records
         .into_iter()
         .map(|record| (record.id.clone(), record))
@@ -936,6 +1594,7 @@ fn index_full_player_database(
     process_id: u32,
     save_pointer: u64,
     player_vtable: u64,
+    module: ModuleInfo,
     managed_player_ids: &HashSet<String>,
     managed_records: Vec<IndexedPlayerRecord>,
 ) -> Result<IndexSummary, ExtractionFailure> {
@@ -943,7 +1602,15 @@ fn index_full_player_database(
         .into_iter()
         .map(|record| (record.id.clone(), record))
         .collect();
-    let candidate_addresses = reader.scan_private_memory_for_pointer(player_vtable)?;
+    let tactics_manager_vtable = module.base + profile.constants.tactics_manager_vtable_rva;
+    let mut object_hits =
+        scan_private_memory_for_pointers(reader, &[player_vtable, tactics_manager_vtable])
+            .map_err(|error| ExtractionFailure::new("player_database", error.to_string()))?;
+    let candidate_addresses = object_hits.remove(&player_vtable).unwrap_or_default();
+    let tactic_manager_hits = object_hits
+        .remove(&tactics_manager_vtable)
+        .unwrap_or_default();
+    let tactic_manager_pointer = (tactic_manager_hits.len() == 1).then_some(tactic_manager_hits[0]);
 
     for address in candidate_addresses {
         if records.len() >= 250_000 {
@@ -980,7 +1647,11 @@ fn index_full_player_database(
             records,
         };
     }
-    Ok(IndexSummary { total, background })
+    Ok(IndexSummary {
+        total,
+        background,
+        tactic_manager_pointer,
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -1035,7 +1706,188 @@ fn read_indexed_player_candidate(
         positions,
         managed_squad: false,
         visibility_safe: false,
+        raw_player_address: raw_player,
+        person_address: person,
+        contract_address: reader
+            .read_pointer(person.checked_add(profile.constants.person_contract_offset)?)
+            .filter(|value| *value != 0),
     })
+}
+
+fn visible_ability_score(position: &str, attributes: &HashMap<String, u8>) -> Option<u8> {
+    let keys: &[&str] = match position {
+        "GK" => &[
+            "Aerial Reach",
+            "Command of Area",
+            "Communication",
+            "Handling",
+            "One on Ones",
+            "Reflexes",
+            "Positioning",
+            "Decisions",
+        ],
+        "DC" | "SW" => &[
+            "Marking",
+            "Tackling",
+            "Heading",
+            "Positioning",
+            "Anticipation",
+            "Decisions",
+            "Jumping Reach",
+            "Strength",
+        ],
+        "DL" | "DR" | "WBL" | "WBR" => &[
+            "Marking",
+            "Tackling",
+            "Positioning",
+            "Crossing",
+            "Pace",
+            "Acceleration",
+            "Stamina",
+            "Work Rate",
+        ],
+        "DM" => &[
+            "Tackling",
+            "Positioning",
+            "Anticipation",
+            "Decisions",
+            "Passing",
+            "Teamwork",
+            "Work Rate",
+            "Stamina",
+        ],
+        "ML" | "MR" | "AML" | "AMR" => &[
+            "Crossing",
+            "Dribbling",
+            "First Touch",
+            "Off the Ball",
+            "Pace",
+            "Acceleration",
+            "Agility",
+            "Technique",
+        ],
+        "MC" | "AMC" => &[
+            "Passing",
+            "Vision",
+            "First Touch",
+            "Technique",
+            "Decisions",
+            "Anticipation",
+            "Teamwork",
+            "Work Rate",
+        ],
+        "ST" => &[
+            "Finishing",
+            "First Touch",
+            "Off the Ball",
+            "Anticipation",
+            "Composure",
+            "Acceleration",
+            "Pace",
+            "Technique",
+        ],
+        _ => &["Decisions", "Teamwork", "Work Rate", "Natural Fitness"],
+    };
+    let values = keys
+        .iter()
+        .filter_map(|key| attributes.get(*key).copied())
+        .map(u32::from)
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| {
+        let average = values.iter().sum::<u32>() as f32 / values.len() as f32;
+        ((average / 20.0) * 100.0).round().clamp(0.0, 100.0) as u8
+    })
+}
+
+fn attribute_evidence(attributes: &HashMap<String, u8>) -> (Vec<String>, Vec<String>) {
+    let mut values = attributes
+        .iter()
+        .map(|(name, value)| (name.clone(), *value))
+        .collect::<Vec<_>>();
+    values.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    let strengths = values
+        .iter()
+        .take(3)
+        .map(|(name, value)| format!("{name} {value}"))
+        .collect();
+    let weaknesses = values
+        .iter()
+        .rev()
+        .take(3)
+        .map(|(name, value)| format!("{name} {value}"))
+        .collect();
+    (strengths, weaknesses)
+}
+
+fn is_leap_year(year: u16) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+fn month_day(date: FmDate) -> Option<(u8, u8)> {
+    let mut remaining = u32::from(date.day_of_year);
+    if remaining == 0 {
+        return None;
+    }
+    let month_lengths = [
+        31_u32,
+        if is_leap_year(date.year) { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    for (index, length) in month_lengths.iter().enumerate() {
+        if remaining <= *length {
+            return Some(((index + 1) as u8, remaining as u8));
+        }
+        remaining -= length;
+    }
+    None
+}
+
+fn format_fm_date(date: FmDate) -> Option<String> {
+    let (month, day) = month_day(date)?;
+    Some(format!("{:04}-{month:02}-{day:02}", date.year))
+}
+
+fn calculate_age(birth: FmDate, current: FmDate) -> Option<u8> {
+    if current.year < birth.year {
+        return None;
+    }
+    let birthday_passed = current.day_of_year >= birth.day_of_year;
+    let years = current.year - birth.year - u16::from(!birthday_passed);
+    u8::try_from(years).ok().filter(|age| *age <= 100)
+}
+
+#[cfg(target_os = "windows")]
+fn read_fm_date(reader: &mut ProcessReader, address: u64) -> Option<FmDate> {
+    let bytes = reader.read_bytes(address, 4)?;
+    let day_of_year = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let year = u16::from_le_bytes([bytes[2], bytes[3]]);
+    let max_day = if is_leap_year(year) { 366 } else { 365 };
+    (year >= 1900 && day_of_year > 0 && day_of_year <= max_day)
+        .then_some(FmDate { year, day_of_year })
+}
+
+#[cfg(target_os = "windows")]
+fn read_nationality(
+    reader: &mut ProcessReader,
+    person: u64,
+    profile: &EntityMapProfile,
+) -> Option<String> {
+    let nation = reader.read_pointer(person + profile.constants.person_nationality_offset)?;
+    let name = (nation != 0)
+        .then(|| reader.read_pointer(nation + profile.constants.nation_name_offset))
+        .flatten()?;
+    (name != 0)
+        .then(|| reader.read_length_prefixed_string(name))
+        .flatten()
 }
 
 fn display_name(
@@ -1068,71 +1920,15 @@ fn read_name_field(reader: &mut ProcessReader, field: u64) -> Option<String> {
     reader.read_length_prefixed_string(text)
 }
 
-#[cfg(target_os = "windows")]
-fn validate_vtable(
-    reader: &mut ProcessReader,
-    object: u64,
-    expected: u64,
-    stage: &'static str,
-) -> Result<(), ExtractionFailure> {
-    let actual = reader.read_pointer(object).ok_or_else(|| {
-        ExtractionFailure::new(stage, "A required FM26 object could not be read.")
-    })?;
-    if actual != expected {
-        return Err(ExtractionFailure::new(
-            stage,
-            format!(
-                "A required FM26 object failed type validation (expected {}, found {}). No data was shown.",
-                hex_address(expected),
-                hex_address(actual)
-            ),
-        ));
-    }
-    Ok(())
+#[cfg(test)]
+fn checked_currency_transform(raw: i64, scale: u64, maximum: u64) -> Option<u64> {
+    let value = u64::try_from(raw).ok()?.checked_mul(scale)?;
+    (value <= maximum).then_some(value)
 }
 
-fn parse_pattern(pattern: &str) -> Result<Vec<Option<u8>>, ExtractionFailure> {
-    pattern
-        .split_whitespace()
-        .map(|token| {
-            if token == "??" || token == "?" {
-                Ok(None)
-            } else {
-                u8::from_str_radix(token, 16).map(Some).map_err(|_| {
-                    ExtractionFailure::new(
-                        "entity_map",
-                        "The embedded signature pattern is invalid.",
-                    )
-                })
-            }
-        })
-        .collect()
-}
-
-fn find_entity_map(identity: &ExecutableIdentity) -> Option<&'static EntityMapProfile> {
-    static INDEX: OnceLock<EntityMapIndex> = OnceLock::new();
-    let index = INDEX.get_or_init(|| {
-        serde_json::from_str(include_str!("../entity-maps/index.json"))
-            .expect("embedded entity-map index must be valid JSON")
-    });
-    if index.schema_version != 1 {
-        return None;
-    }
-    index.profiles.iter().find(|profile| {
-        let declared_shape_is_valid = !profile.module.is_empty()
-            && profile
-                .signatures
-                .iter()
-                .all(|signature| !signature.name.is_empty() && !signature.pattern.is_empty())
-            && profile.pointer_chains.iter().all(|chain| {
-                !chain.name.is_empty() && !chain.root.is_empty() && !chain.offsets.is_empty()
-            });
-        declared_shape_is_valid
-            && identity.file_version.as_deref() == Some(profile.file_version.as_str())
-            && identity.product_version.as_deref() == Some(profile.product_version.as_str())
-            && identity.sha256.as_deref() == Some(profile.executable_sha256.as_str())
-            && identity.architecture.as_deref() == Some(profile.architecture.as_str())
-    })
+#[cfg(test)]
+fn validated_enum<'a>(raw: usize, values: &'a [&'a str]) -> Option<&'a str> {
+    values.get(raw).copied()
 }
 
 fn read_executable_identity(path: &str) -> ExecutableIdentity {
@@ -1215,382 +2011,13 @@ fn unix_milliseconds() -> String {
         .unwrap_or_default()
 }
 
-#[cfg(target_os = "windows")]
-#[derive(Clone, Copy)]
-struct ModuleInfo {
-    base: u64,
-    size: usize,
-}
-
-#[cfg(target_os = "windows")]
-#[derive(Clone, Copy)]
-struct MemoryRegion {
-    base: u64,
-    size: usize,
-}
-
-#[cfg(target_os = "windows")]
-struct ProcessReader {
-    handle: Handle,
-    bytes_read: usize,
-    last_error: Option<u32>,
-}
-
-#[cfg(target_os = "windows")]
-impl ProcessReader {
-    fn open(process_id: u32) -> Result<Self, u32> {
-        let handle = unsafe { OpenProcess(READ_ONLY_PROCESS_ACCESS, 0, process_id) };
-        if handle.is_null() {
-            return Err(unsafe { GetLastError() });
-        }
-        Ok(Self {
-            handle,
-            bytes_read: 0,
-            last_error: None,
-        })
-    }
-
-    fn process_path(&mut self) -> Option<String> {
-        let mut buffer = vec![0_u16; 32_768];
-        let mut size = buffer.len() as u32;
-        if unsafe { QueryFullProcessImageNameW(self.handle, 0, buffer.as_mut_ptr(), &mut size) }
-            == 0
-        {
-            self.last_error = Some(unsafe { GetLastError() });
-            return None;
-        }
-        Some(String::from_utf16_lossy(&buffer[..size as usize]))
-    }
-
-    fn module(&mut self, wanted_name: &str) -> Option<ModuleInfo> {
-        let mut modules = vec![std::ptr::null_mut(); 2048];
-        let mut needed = 0_u32;
-        if unsafe {
-            EnumProcessModulesEx(
-                self.handle,
-                modules.as_mut_ptr(),
-                (modules.len() * std::mem::size_of::<Handle>()) as u32,
-                &mut needed,
-                0x03,
-            )
-        } == 0
-        {
-            self.last_error = Some(unsafe { GetLastError() });
-            return None;
-        }
-        let count = (needed as usize / std::mem::size_of::<Handle>()).min(modules.len());
-        for module in modules.into_iter().take(count) {
-            let mut name = [0_u16; 1024];
-            let name_length = unsafe {
-                GetModuleBaseNameW(self.handle, module, name.as_mut_ptr(), name.len() as u32)
-            };
-            if name_length == 0 {
-                continue;
-            }
-            if String::from_utf16_lossy(&name[..name_length as usize])
-                .eq_ignore_ascii_case(wanted_name)
-            {
-                let mut info = NativeModuleInfo::default();
-                if unsafe {
-                    GetModuleInformation(
-                        self.handle,
-                        module,
-                        &mut info,
-                        std::mem::size_of::<NativeModuleInfo>() as u32,
-                    )
-                } == 0
-                {
-                    self.last_error = Some(unsafe { GetLastError() });
-                    return None;
-                }
-                return Some(ModuleInfo {
-                    base: info.base_of_dll as u64,
-                    size: info.size_of_image as usize,
-                });
-            }
-        }
-        None
-    }
-
-    fn read_bytes(&mut self, address: u64, size: usize) -> Option<Vec<u8>> {
-        let mut buffer = vec![0_u8; size];
-        let mut bytes_read = 0_usize;
-        let result = unsafe {
-            ReadProcessMemory(
-                self.handle,
-                address as *const std::ffi::c_void,
-                buffer.as_mut_ptr().cast(),
-                size,
-                &mut bytes_read,
-            )
-        };
-        self.bytes_read = self.bytes_read.saturating_add(bytes_read);
-        if result == 0 || bytes_read != size {
-            self.last_error = Some(unsafe { GetLastError() });
-            return None;
-        }
-        Some(buffer)
-    }
-
-    fn read_pointer(&mut self, address: u64) -> Option<u64> {
-        self.read_bytes(address, 8)
-            .map(|bytes| u64::from_le_bytes(bytes.try_into().expect("eight bytes")))
-    }
-
-    fn read_u32(&mut self, address: u64) -> Option<u32> {
-        self.read_bytes(address, 4)
-            .map(|bytes| u32::from_le_bytes(bytes.try_into().expect("four bytes")))
-    }
-
-    fn read_i32(&mut self, address: u64) -> Option<i32> {
-        self.read_bytes(address, 4)
-            .map(|bytes| i32::from_le_bytes(bytes.try_into().expect("four bytes")))
-    }
-
-    fn read_length_prefixed_string(&mut self, address: u64) -> Option<String> {
-        let length = self.read_u32(address)? as usize;
-        if length == 0 || length > MAX_STRING_BYTES {
-            return None;
-        }
-        let bytes = self.read_bytes(address + 4, length)?;
-        let value = String::from_utf8(bytes).ok()?;
-        if value.chars().any(char::is_control) {
-            return None;
-        }
-        Some(value)
-    }
-
-    fn scan_module(
-        &mut self,
-        module: ModuleInfo,
-        pattern: &[Option<u8>],
-    ) -> Result<Vec<u64>, ExtractionFailure> {
-        if pattern.is_empty() || module.size < pattern.len() {
-            return Err(ExtractionFailure::new(
-                "manager_signature",
-                "The manager signature is empty or larger than the game module.",
-            ));
-        }
-        const CHUNK_SIZE: usize = 4 * 1024 * 1024;
-        let overlap = pattern.len().saturating_sub(1);
-        let mut hits = Vec::new();
-        let mut offset = 0_usize;
-        while offset < module.size {
-            let read_start = offset.saturating_sub(if offset == 0 { 0 } else { overlap });
-            let read_size = CHUNK_SIZE
-                .saturating_add(if offset == 0 { 0 } else { overlap })
-                .min(module.size - read_start);
-            let bytes = self
-                .read_bytes(module.base + read_start as u64, read_size)
-                .ok_or_else(|| {
-                    ExtractionFailure::new(
-                        "manager_signature",
-                        "The FM26 game module could not be scanned with read-only access.",
-                    )
-                })?;
-            for position in 0..=bytes.len().saturating_sub(pattern.len()) {
-                let absolute_offset = read_start + position;
-                if offset != 0 && absolute_offset < offset {
-                    continue;
-                }
-                if pattern.iter().enumerate().all(|(index, expected)| {
-                    expected.is_none_or(|value| bytes[position + index] == value)
-                }) {
-                    hits.push(module.base + absolute_offset as u64);
-                }
-            }
-            offset = offset.saturating_add(CHUNK_SIZE);
-        }
-        Ok(hits)
-    }
-
-    fn scan_private_memory_for_pointer(
-        &mut self,
-        pointer: u64,
-    ) -> Result<Vec<u64>, ExtractionFailure> {
-        const MEM_COMMIT: u32 = 0x1000;
-        const MEM_PRIVATE: u32 = 0x20000;
-        const PAGE_NOACCESS: u32 = 0x01;
-        const PAGE_GUARD: u32 = 0x100;
-        const CHUNK_SIZE: usize = 8 * 1024 * 1024;
-        const MAX_SCAN_BYTES: usize = 8 * 1024 * 1024 * 1024;
-
-        let mut regions = Vec::new();
-        let mut address = 0_u64;
-        let mut considered = 0_usize;
-        loop {
-            let mut info = NativeMemoryInfo::default();
-            let queried = unsafe {
-                VirtualQueryEx(
-                    self.handle,
-                    address as *const std::ffi::c_void,
-                    &mut info,
-                    std::mem::size_of::<NativeMemoryInfo>(),
-                )
-            };
-            if queried == 0 {
-                break;
-            }
-            let base = info.base_address as u64;
-            let size = info.region_size;
-            if size == 0 {
-                break;
-            }
-            let readable = info.state == MEM_COMMIT
-                && info.memory_type == MEM_PRIVATE
-                && info.protect & (PAGE_NOACCESS | PAGE_GUARD) == 0;
-            if readable && considered.saturating_add(size) <= MAX_SCAN_BYTES {
-                regions.push(MemoryRegion { base, size });
-                considered = considered.saturating_add(size);
-            }
-            let next = base.saturating_add(size as u64);
-            if next <= address {
-                break;
-            }
-            address = next;
-        }
-        if regions.is_empty() {
-            return Err(ExtractionFailure::new(
-                "player_database",
-                "No readable FM26 private-memory regions were available for player indexing.",
-            ));
-        }
-
-        let needle = pointer.to_le_bytes();
-        let mut hits = Vec::new();
-        for region in regions {
-            let mut offset = 0_usize;
-            while offset < region.size {
-                let size = CHUNK_SIZE.min(region.size - offset);
-                let Some(bytes) = self.read_bytes(region.base + offset as u64, size) else {
-                    offset = offset.saturating_add(size);
-                    continue;
-                };
-                let base = region.base + offset as u64;
-                let first_aligned = ((8 - (base as usize & 7)) & 7).min(bytes.len());
-                let mut position = first_aligned;
-                while position + needle.len() <= bytes.len() {
-                    if bytes[position..position + needle.len()] == needle {
-                        hits.push(base + position as u64);
-                    }
-                    position += 8;
-                }
-                offset = offset.saturating_add(size);
-            }
-        }
-        Ok(hits)
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl Drop for ProcessReader {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.handle);
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-type Handle = *mut std::ffi::c_void;
-
-#[cfg(target_os = "windows")]
-#[repr(C)]
-#[derive(Default)]
-struct NativeModuleInfo {
-    base_of_dll: *mut std::ffi::c_void,
-    size_of_image: u32,
-    entry_point: *mut std::ffi::c_void,
-}
-
-#[cfg(target_os = "windows")]
-#[repr(C)]
-#[derive(Default)]
-struct NativeMemoryInfo {
-    base_address: *mut std::ffi::c_void,
-    allocation_base: *mut std::ffi::c_void,
-    allocation_protect: u32,
-    partition_id: u16,
-    alignment: u16,
-    region_size: usize,
-    state: u32,
-    protect: u32,
-    memory_type: u32,
-    alignment_two: u32,
-}
-
-#[cfg(target_os = "windows")]
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> Handle;
-    fn CloseHandle(handle: Handle) -> i32;
-    fn GetLastError() -> u32;
-    fn QueryFullProcessImageNameW(
-        process: Handle,
-        flags: u32,
-        file_name: *mut u16,
-        size: *mut u32,
-    ) -> i32;
-    fn ReadProcessMemory(
-        process: Handle,
-        base_address: *const std::ffi::c_void,
-        buffer: *mut std::ffi::c_void,
-        size: usize,
-        bytes_read: *mut usize,
-    ) -> i32;
-    fn VirtualQueryEx(
-        process: Handle,
-        address: *const std::ffi::c_void,
-        buffer: *mut NativeMemoryInfo,
-        length: usize,
-    ) -> usize;
-}
-
-#[cfg(target_os = "windows")]
-#[link(name = "psapi")]
-unsafe extern "system" {
-    fn EnumProcessModulesEx(
-        process: Handle,
-        modules: *mut Handle,
-        size: u32,
-        needed: *mut u32,
-        filter: u32,
-    ) -> i32;
-    fn GetModuleBaseNameW(process: Handle, module: Handle, base_name: *mut u16, size: u32) -> u32;
-    fn GetModuleInformation(
-        process: Handle,
-        module: Handle,
-        module_info: *mut NativeModuleInfo,
-        size: u32,
-    ) -> i32;
-}
-
-#[cfg(target_os = "windows")]
-fn find_fm26_process() -> Option<(u32, Option<String>)> {
-    let output = std::process::Command::new("tasklist")
-        .args(["/FI", "IMAGENAME eq fm.exe", "/FO", "CSV", "/NH"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let row = stdout
-        .lines()
-        .find(|line| line.to_ascii_lowercase().contains("fm.exe"))?;
-    let columns: Vec<&str> = row.trim().trim_matches('"').split("\",\"").collect();
-    let pid = columns.get(1)?.replace(',', "").parse::<u32>().ok()?;
-    Some((pid, None))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn find_fm26_process() -> Option<(u32, Option<String>)> {
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fm26::{
+        offsets::{embedded_entity_map_index, field_is_publishable, FieldDefinition},
+        permissions::READ_ONLY_PROCESS_ACCESS,
+    };
 
     #[test]
     fn connector_contract_never_requests_or_advertises_write_access() {
@@ -1600,15 +2027,24 @@ mod tests {
 
     #[test]
     fn exact_build_profile_is_embedded_and_read_only() {
-        let index: EntityMapIndex =
-            serde_json::from_str(include_str!("../entity-maps/index.json")).unwrap();
-        assert_eq!(index.schema_version, 1);
+        let index = embedded_entity_map_index();
+        assert_eq!(index.schema_version, 2);
         assert_eq!(index.profiles.len(), 1);
         assert_eq!(index.profiles[0].module, "game_plugin.dll");
         assert_eq!(
             index.profiles[0].executable_sha256,
             "3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73"
         );
+        let coverage = mapping_coverage(&index.profiles[0]);
+        assert!(coverage
+            .iter()
+            .any(|section| section.section == "player" && section.validated >= 7));
+        assert!(coverage
+            .iter()
+            .any(|section| section.section == "contract" && section.unmapped >= 4));
+        assert!(coverage
+            .iter()
+            .any(|section| section.section == "recruitment" && section.candidate >= 2));
     }
 
     #[test]
@@ -1624,6 +2060,7 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    #[ignore = "live FM26 integration test; run manually with an active save"]
     fn running_exact_build_extracts_live_entities_without_hidden_ability_fields() {
         if find_fm26_process().is_none() {
             return;
@@ -1634,30 +2071,50 @@ mod tests {
             "{}",
             snapshot.status.message
         );
-        assert_eq!(snapshot.manager_name.as_deref(), Some("Tobias Thorsen"));
-        assert_eq!(
-            snapshot
-                .clubs
-                .first()
-                .and_then(|club| club["name"].as_str()),
-            Some("Madla IL")
+        assert!(snapshot
+            .manager_name
+            .as_deref()
+            .is_some_and(|name| !name.is_empty()));
+        assert!(snapshot
+            .clubs
+            .first()
+            .and_then(|club| club["name"].as_str())
+            .is_some_and(|name| !name.is_empty()));
+        assert!(
+            snapshot.players.len() >= 11,
+            "expected at least a selected squad, got {}",
+            snapshot.players.len()
         );
-        assert_eq!(snapshot.players.len(), 38);
         assert!(snapshot.tactic.is_none());
         assert_eq!(snapshot.tactic_source, "none");
-        assert_eq!(snapshot.status.live_memory_tactic_read, "disabled");
+        assert_eq!(snapshot.status.live_memory_tactic_read, "object_not_found");
         for player in &snapshot.players {
             assert!(player["currentAbility"].is_null());
             assert!(player["potentialAbility"].is_null());
             assert!(player["attributes"]
                 .as_object()
-                .is_some_and(|value| value.is_empty()));
+                .is_some_and(|value| !value.is_empty()));
+            assert_eq!(player["scoutKnowledge"], "fully_known");
+        }
+        if let Some(lars) = snapshot
+            .players
+            .iter()
+            .find(|player| player["id"] == "53179170")
+        {
+            assert_eq!(lars["age"], 30);
+            assert_eq!(lars["dateOfBirth"], "1995-08-13");
+            assert_eq!(lars["nationality"], "Norway");
+            assert_eq!(lars["attributes"]["Aerial Reach"], 15);
+            assert_eq!(lars["attributes"]["Communication"], 12);
+            assert!(lars["attributes"].get("Consistency").is_none());
+            assert!(lars["attributes"].get("Injury Proneness").is_none());
         }
     }
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn full_save_index_keeps_unvalidated_background_players_hidden() {
+    #[ignore = "live FM26 integration test; run manually with an active save"]
+    fn full_save_index_exposes_identity_only_background_search_records() {
         if find_fm26_process().is_none() {
             return;
         }
@@ -1669,11 +2126,16 @@ mod tests {
         );
         assert_eq!(snapshot.status.database_index_status, "ready");
         assert_eq!(snapshot.status.database_scope, "full-save-index");
-        assert!(
-            snapshot.status.database_players_indexed
-                >= snapshot.status.managed_squad_players
-        );
+        assert!(snapshot.status.database_players_indexed >= snapshot.status.managed_squad_players);
         assert!(snapshot.status.background_players_indexed > 0);
+        assert_eq!(snapshot.status.live_memory_tactic_read, "ready");
+        assert!(snapshot.status.tactic_manager_pointer.is_some());
+        let tactic = snapshot.tactic.as_ref().expect("live tactic");
+        assert!(tactic["formation"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()));
+        assert_eq!(tactic["slots"].as_array().map(Vec::len), Some(11));
+        assert_eq!(snapshot.tactic_source, "live-memory");
         assert_eq!(
             snapshot.status.visible_players_loaded,
             snapshot.players.len() as u32
@@ -1681,6 +2143,456 @@ mod tests {
         let visible_results = search_indexed_players("Jøran".to_string());
         assert!(visible_results
             .iter()
-            .all(|player| player["visibility"] == "club-visible"));
+            .all(|player| player["visibility"] == "known" || player["visibility"] == "unknown"));
+    }
+
+    #[test]
+    fn fm_dates_and_age_match_the_current_save_calendar() {
+        let birth = FmDate {
+            year: 1995,
+            day_of_year: 225,
+        };
+        let current = FmDate {
+            year: 2026,
+            day_of_year: 150,
+        };
+        assert_eq!(format_fm_date(birth).as_deref(), Some("1995-08-13"));
+        assert_eq!(format_fm_date(current).as_deref(), Some("2026-05-30"));
+        assert_eq!(calculate_age(birth, current), Some(30));
+    }
+
+    #[test]
+    fn hidden_and_foot_storage_values_never_enter_visible_attributes() {
+        let raw = vec![50_u8; PLAYER_ATTRIBUTE_NAMES.len()];
+        let attributes = visible_attribute_map(&raw);
+        assert_eq!(attributes.get("Crossing"), Some(&10));
+        for hidden in [
+            "Dirtiness",
+            "Consistency",
+            "Important Matches",
+            "Injury Proneness",
+            "Versatility",
+            "Left Foot",
+            "Right Foot",
+        ] {
+            assert!(!attributes.contains_key(hidden));
+        }
+    }
+
+    #[test]
+    fn currency_and_enum_transforms_reject_invalid_values() {
+        assert_eq!(
+            checked_currency_transform(125_000, 1, 1_000_000_000),
+            Some(125_000)
+        );
+        assert_eq!(checked_currency_transform(-1, 1, 1_000_000_000), None);
+        assert_eq!(
+            checked_currency_transform(2_000_000, 1_000, 1_000_000_000),
+            None
+        );
+        assert_eq!(
+            validated_enum(1, &["unknown", "interested", "not_interested"]),
+            Some("interested")
+        );
+        assert_eq!(validated_enum(4, &["unknown", "interested"]), None);
+    }
+
+    #[test]
+    fn candidates_cannot_cross_the_publication_confidence_gate() {
+        let candidate = FieldDefinition {
+            offset: Some(32),
+            source: "contract".to_string(),
+            value_type: "currency".to_string(),
+            transform: Some("identity".to_string()),
+            status: "candidate".to_string(),
+            confidence: 0.94,
+            validations: vec!["one observation".to_string()],
+        };
+        assert!(!field_is_publishable(&candidate));
+        let validated = FieldDefinition {
+            status: "validated".to_string(),
+            confidence: 0.97,
+            validations: vec!["100 players".to_string(), "two saves".to_string()],
+            ..candidate
+        };
+        assert!(field_is_publishable(&validated));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore]
+    fn debug_live_tactic_contract_windows() {
+        if find_fm26_process().is_none() {
+            println!("FM26 is not running.");
+            return;
+        }
+        let snapshot = collect_snapshot(true, None);
+        println!(
+            "snapshot state={} message={}",
+            snapshot.status.state, snapshot.status.message
+        );
+        assert_eq!(snapshot.status.state, "connected");
+
+        let index = PLAYER_DATABASE_INDEX
+            .get()
+            .expect("player index")
+            .read()
+            .expect("player index lock");
+        let process_id = index.process_id;
+        let mut managed = index
+            .records
+            .values()
+            .filter(|record| record.managed_squad)
+            .cloned()
+            .collect::<Vec<_>>();
+        managed.sort_by(|left, right| left.name.cmp(&right.name));
+        drop(index);
+        let active_tactic_name_needles = [
+            "Sveingard",
+            "Jelsa",
+            "Sallabegolli",
+            "Osland",
+            "Romvig",
+            "Rabenorolahy",
+            "Sandtorv",
+            "Bergset",
+            "Helgevold",
+            "Thulin",
+            "Marchewka",
+        ];
+        let active_tactic_records = managed
+            .iter()
+            .filter(|record| {
+                active_tactic_name_needles
+                    .iter()
+                    .any(|needle| record.name.contains(needle))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut reader = ProcessReader::open(process_id).expect("open FM26");
+        let process_path = reader.process_path().expect("process path");
+        let identity = read_executable_identity(&process_path);
+        let profile = find_entity_map(
+            identity.file_version.as_deref(),
+            identity.product_version.as_deref(),
+            identity.sha256.as_deref(),
+            identity.architecture.as_deref(),
+        )
+        .expect("entity map");
+        let module = reader.module(&profile.module).expect("game module");
+        let player_vtable = reader
+            .read_pointer(managed[0].raw_player_address)
+            .expect("player vtable");
+        let tactic_vtable = module.base + profile.constants.tactics_manager_vtable_rva;
+        let mut scan_needles = vec![player_vtable, tactic_vtable];
+        for record in &active_tactic_records {
+            scan_needles.push(record.raw_player_address);
+            scan_needles.push(record.person_address);
+            if let Some(contract_address) = record.contract_address {
+                scan_needles.push(contract_address);
+            }
+        }
+        let mut hits = scan_private_memory_for_pointers(&mut reader, &scan_needles)
+            .expect("scan private memory");
+        let player_hits = hits.remove(&player_vtable).unwrap_or_default();
+        let tactic_hits = hits.remove(&tactic_vtable).unwrap_or_default();
+        println!(
+            "player_vtable={} hits={} tactic_vtable={} hits={:?}",
+            hex_address(player_vtable),
+            player_hits.len(),
+            hex_address(tactic_vtable),
+            tactic_hits
+                .iter()
+                .take(8)
+                .map(|value| hex_address(*value))
+                .collect::<Vec<_>>()
+        );
+        println!("active tactic player pointer hits:");
+        let mut clustered_hits = Vec::new();
+        for record in &active_tactic_records {
+            for (kind, pointer) in [
+                ("raw", Some(record.raw_player_address)),
+                ("person", Some(record.person_address)),
+                ("contract", record.contract_address),
+            ] {
+                let Some(pointer) = pointer else {
+                    continue;
+                };
+                let found = hits.remove(&pointer).unwrap_or_default();
+                println!(
+                    "  {} {} {kind}={} hits={}",
+                    record.id,
+                    record.name,
+                    hex_address(pointer),
+                    found.len()
+                );
+                for address in found.into_iter().take(64) {
+                    clustered_hits.push((address, format!("{kind}:{} {}", record.id, record.name)));
+                }
+            }
+        }
+        clustered_hits.sort_by_key(|(address, _)| *address);
+        let mut page_counts: HashMap<u64, Vec<String>> = HashMap::new();
+        for (address, label) in clustered_hits {
+            page_counts
+                .entry(address & !0xfff)
+                .or_default()
+                .push(format!("{}@{}", label, hex_address(address)));
+        }
+        let mut clusters = page_counts.into_iter().collect::<Vec<_>>();
+        clusters.sort_by(|left, right| right.1.len().cmp(&left.1.len()));
+        println!("active tactic pointer clusters:");
+        for (page, labels) in clusters
+            .into_iter()
+            .take(30)
+            .filter(|(_, labels)| labels.len() >= 2)
+        {
+            println!(
+                "  page={} count={} {:?}",
+                hex_address(page),
+                labels.len(),
+                labels
+            );
+        }
+
+        if let Some(tactic_object) = tactic_hits.first().copied() {
+            let bytes = reader
+                .read_bytes(tactic_object, 8192)
+                .expect("tactic manager window");
+            println!("tactic_object={}", hex_address(tactic_object));
+            println!("small tactic i32/u32 values:");
+            for offset in (0..bytes.len()).step_by(4) {
+                let signed = i32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                let unsigned = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                if (-1..=100).contains(&signed) {
+                    println!("  off={offset:04X} i32={signed} u32={unsigned}");
+                }
+            }
+            println!("tactic pointer-like fields:");
+            for offset in (0..2048).step_by(8) {
+                let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+                if (0x10000000000..0x0000_8000_0000_0000).contains(&pointer) {
+                    let first_u32 = reader.read_u32(pointer).unwrap_or_default();
+                    let first_ptr = reader.read_pointer(pointer).unwrap_or_default();
+                    println!(
+                        "  off={offset:04X} ptr={} first_u32={} first_ptr={}",
+                        hex_address(pointer),
+                        first_u32,
+                        hex_address(first_ptr)
+                    );
+                }
+            }
+
+            let large_bytes = reader
+                .read_bytes(tactic_object, 0x8000)
+                .expect("large tactic manager window");
+            println!("managed players for tactic matching:");
+            for record in &managed {
+                println!(
+                    "  {} {} raw={} person={} contract={}",
+                    record.id,
+                    record.name,
+                    hex_address(record.raw_player_address),
+                    hex_address(record.person_address),
+                    record
+                        .contract_address
+                        .map(hex_address)
+                        .unwrap_or_else(|| "none".to_string())
+                );
+            }
+            print_player_reference_hits("tactic-manager", tactic_object, &large_bytes, &managed);
+            print_role_like_runs("tactic-manager", tactic_object, &large_bytes);
+
+            let mut child_targets = Vec::new();
+            for offset in (0..0x1000).step_by(8) {
+                let pointer =
+                    u64::from_le_bytes(large_bytes[offset..offset + 8].try_into().unwrap());
+                if (0x10000000000..0x0000_8000_0000_0000).contains(&pointer)
+                    && !child_targets.contains(&pointer)
+                {
+                    child_targets.push(pointer);
+                }
+            }
+            println!("tactic child pointer probes:");
+            for (index, target) in child_targets.into_iter().take(96).enumerate() {
+                let Some(child_bytes) = reader.read_bytes(target, 0x1000) else {
+                    continue;
+                };
+                let label = format!("child#{index:02}");
+                let player_hits = count_player_reference_hits(target, &child_bytes, &managed);
+                let role_hits = count_role_like_runs(&child_bytes);
+                if player_hits > 0 || role_hits > 0 {
+                    println!(
+                        "  {label} base={} player_hits={} role_runs={}",
+                        hex_address(target),
+                        player_hits,
+                        role_hits
+                    );
+                    print_player_reference_hits(&label, target, &child_bytes, &managed);
+                    print_role_like_runs(&label, target, &child_bytes);
+                }
+            }
+        }
+
+        println!("managed contract windows:");
+        for record in managed.iter().take(12) {
+            let Some(contract) = record.contract_address else {
+                println!("{} {} no contract", record.id, record.name);
+                continue;
+            };
+            let bytes = reader.read_bytes(contract, 1024).expect("contract window");
+            let mut small_values = Vec::new();
+            let mut date_candidates = Vec::new();
+            for offset in (0..bytes.len()).step_by(4) {
+                let signed = i32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                let unsigned = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                if (0..=5_000_000).contains(&signed) {
+                    small_values.push(format!("{offset:03X}:{signed}"));
+                }
+                let day = u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap());
+                let year = u16::from_le_bytes(bytes[offset + 2..offset + 4].try_into().unwrap());
+                if (1..=366).contains(&day) && (2026..=2045).contains(&year) {
+                    date_candidates.push(format!("{offset:03X}:{year}-{day} raw={unsigned}"));
+                }
+            }
+            println!(
+                "{} {} contract={} vtable={} dates=[{}] values=[{}]",
+                record.id,
+                record.name,
+                hex_address(contract),
+                hex_address(reader.read_pointer(contract).unwrap_or_default()),
+                date_candidates.join(", "),
+                small_values.join(" ")
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn print_player_reference_hits(
+        label: &str,
+        base: u64,
+        bytes: &[u8],
+        records: &[IndexedPlayerRecord],
+    ) {
+        for offset in (0..bytes.len().saturating_sub(8)).step_by(8) {
+            let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+            for record in records {
+                if pointer == record.raw_player_address {
+                    println!(
+                        "    {label}+{offset:04X}: raw_player -> {} {}",
+                        record.id, record.name
+                    );
+                }
+                if pointer == record.person_address {
+                    println!(
+                        "    {label}+{offset:04X}: person -> {} {}",
+                        record.id, record.name
+                    );
+                }
+                if Some(pointer) == record.contract_address {
+                    println!(
+                        "    {label}+{offset:04X}: contract -> {} {}",
+                        record.id, record.name
+                    );
+                }
+            }
+        }
+        for offset in (0..bytes.len().saturating_sub(4)).step_by(4) {
+            let uid = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+            for record in records {
+                if record.id.parse::<u32>().ok() == Some(uid) {
+                    println!(
+                        "    {label}+{offset:04X}: uid -> {} {}",
+                        record.id, record.name
+                    );
+                }
+            }
+        }
+        let _ = base;
+    }
+
+    #[cfg(target_os = "windows")]
+    fn count_player_reference_hits(
+        _base: u64,
+        bytes: &[u8],
+        records: &[IndexedPlayerRecord],
+    ) -> usize {
+        let mut hits = 0;
+        for offset in (0..bytes.len().saturating_sub(8)).step_by(8) {
+            let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+            hits += records
+                .iter()
+                .filter(|record| {
+                    pointer == record.raw_player_address
+                        || pointer == record.person_address
+                        || Some(pointer) == record.contract_address
+                })
+                .count();
+        }
+        for offset in (0..bytes.len().saturating_sub(4)).step_by(4) {
+            let uid = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+            hits += records
+                .iter()
+                .filter(|record| record.id.parse::<u32>().ok() == Some(uid))
+                .count();
+        }
+        hits
+    }
+
+    #[cfg(target_os = "windows")]
+    fn print_role_like_runs(label: &str, base: u64, bytes: &[u8]) {
+        let expected_roles = [1_u32, 3, 7, 8, 10, 14, 22, 25, 26, 38];
+        for start in (0..bytes.len().saturating_sub(64)).step_by(4) {
+            let mut values = Vec::new();
+            for offset in (start..start + 64).step_by(4) {
+                let value = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                values.push(value);
+            }
+            let bounded = values
+                .iter()
+                .filter(|value| **value <= 45 || **value == u32::MAX)
+                .count();
+            let role_matches = values
+                .iter()
+                .filter(|value| expected_roles.contains(value))
+                .count();
+            let non_zero = values.iter().filter(|value| **value != 0).count();
+            if bounded >= 12 && role_matches >= 3 && non_zero >= 5 {
+                let absolute = base + start as u64;
+                println!(
+                    "    {label}+{start:04X} abs={} values={:?}",
+                    hex_address(absolute),
+                    values
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn count_role_like_runs(bytes: &[u8]) -> usize {
+        let expected_roles = [1_u32, 3, 7, 8, 10, 14, 22, 25, 26, 38];
+        let mut runs = 0;
+        for start in (0..bytes.len().saturating_sub(64)).step_by(4) {
+            let mut values = Vec::new();
+            for offset in (start..start + 64).step_by(4) {
+                values.push(u32::from_le_bytes(
+                    bytes[offset..offset + 4].try_into().unwrap(),
+                ));
+            }
+            let bounded = values
+                .iter()
+                .filter(|value| **value <= 45 || **value == u32::MAX)
+                .count();
+            let role_matches = values
+                .iter()
+                .filter(|value| expected_roles.contains(value))
+                .count();
+            let non_zero = values.iter().filter(|value| **value != 0).count();
+            if bounded >= 12 && role_matches >= 3 && non_zero >= 5 {
+                runs += 1;
+            }
+        }
+        runs
     }
 }

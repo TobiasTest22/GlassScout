@@ -34,13 +34,16 @@ export type LiveConnectorStatus = {
   moduleBase?: string | null;
   entityMapStatus?: "missing" | "matched" | "invalid" | "not_checked";
   entityMapProfileId?: string | null;
+  mappingSchemaVersion?: number;
+  mappingCoverage?: Array<{ section: string; validated: number; candidate: number; unmapped: number }>;
   pointerValidation?: "not_run" | "passed" | "failed";
   handleAccessFlags?: string;
   entityRoot?: string | null;
   savePointer?: string | null;
   managedClubPointer?: string | null;
   playerCollectionPointer?: string | null;
-  liveMemoryTacticRead?: "disabled";
+  liveMemoryTacticRead?: "not_run" | "object_not_found" | "object_detected_unmapped" | "ready";
+  tacticManagerPointer?: string | null;
   failureStage?: string | null;
   lastSuccessfulRead?: string | null;
   windowsErrorCode?: number | null;
@@ -53,11 +56,16 @@ export type LivePlayer = {
   id: string;
   name: string;
   age: number | null;
+  dateOfBirth?: string | null;
   nationality: string | null;
+  secondNationality?: string | null;
   positions: string[];
   bestRole: string | null;
+  playableRoles?: PlayerRoleFit[];
+  otherRoles?: PlayerRoleFit[];
   currentAbility: number | null;
   potentialAbility: number | null;
+  abilityScore?: number | null;
   form: string | null;
   averageRating: number | null;
   minutesPlayed: number | null;
@@ -70,16 +78,30 @@ export type LivePlayer = {
   developmentTrend: "improving" | "stable" | "declining" | null;
   tacticalFit: number | null;
   roleFit: number | null;
+  preferredFoot?: string | null;
   strengths: string[];
   weaknesses: string[];
   clubId: string | null;
+  clubName?: string | null;
   transferInterest: string | null;
   loanInterest: string | null;
   transferAvailable: boolean | null;
   loanAvailable: boolean | null;
+  notForSale?: boolean | null;
   attributes?: Record<string, number | null>;
   per90?: Record<string, number | null>;
+  inPossessionFit?: number | null;
+  outOfPossessionFit?: number | null;
+  projectedInPossessionFit?: number | null;
+  projectedOutOfPossessionFit?: number | null;
+  matchSharpness?: number | null;
+  fatigue?: number | null;
+  efficiencyScore?: number | null;
+  dossierReference?: string | null;
   scoutKnowledge?: "fully_known" | "partly_known" | "unknown" | "needs_scouting" | "missing_data";
+  scoutConfidence?: number | null;
+  lastScoutedDate?: string | null;
+  reportReliability?: string | null;
   bestCalculatedPosition?: string | null;
   truePrice?: number | null;
   fairPriceRange?: [number, number] | null;
@@ -89,6 +111,53 @@ export type LivePlayer = {
   roleReasoning?: string[];
   riskLevel?: "low" | "medium" | "high" | "unknown";
   marketValueAmount?: number | null;
+  personality?: string | null;
+  condition?: string | null;
+  heightCm?: number | null;
+  rawStats?: Record<string, number | null>;
+  careerTotals?: Record<string, number | null>;
+  formHistory?: string | null;
+  traits?: string | null;
+  contractStartDate?: string | null;
+  signDate?: string | null;
+  contractRemaining?: string | null;
+  recommendation?: RecommendationEvidence;
+  knowledge?: Record<string, KnowledgeField<unknown>>;
+};
+
+export type PlayerRoleFit = {
+  roleKey: string;
+  role: string;
+  shortRole: string;
+  roleIdMask: string;
+  positions: string[];
+  score: number;
+  positionFit: number;
+  attributeFit: number | null;
+  evidence: string[];
+  phase?: "in-possession" | "out-of-possession" | "combined";
+  inPossessionRole?: string | null;
+  outOfPossessionRole?: string | null;
+  inPossessionFit?: number | null;
+  outOfPossessionFit?: number | null;
+  redFlags?: string[];
+};
+
+export type FieldVisibility = "known" | "estimated" | "range" | "unknown";
+
+export type KnowledgeField<T> = {
+  value: T | null;
+  visibility: FieldVisibility;
+  source: "own-squad" | "scout-report" | "player-profile" | "data-hub" | "memory-raw";
+  confidence: number;
+  lastValidated: string | null;
+};
+
+export type RecommendationEvidence = {
+  minimum: number | null;
+  maximum: number | null;
+  completeness: number;
+  label: string;
 };
 
 export type LiveClub = {
@@ -102,42 +171,34 @@ export type LiveTacticSlot = {
   playerId: string | null;
   position: string;
   role: string | null;
+  roleShort?: string | null;
+  roleMask?: string | null;
   duty: string | null;
+  dutyShort?: string | null;
+  dutyMask?: string | null;
+  decoderStatus?: string;
 };
 
 export type LiveTactic = {
   name: string | null;
   formation: string;
+  formationEnum?: string;
   slots: LiveTacticSlot[];
   teamInstructions: string[];
   playerInstructionsReadable: boolean;
+  decoderStatus?: string;
+  formationCode?: number;
+  layoutStatus?: "exact-template" | "formation-name-only";
+  roleDutyDecoderStatus?: string;
+  rolePacketPointer?: string | null;
+  rolePacketStride?: number | null;
+  rolePacketWidth?: number | null;
+  rolesResolved?: number;
+  dutiesResolved?: number;
+  warnings?: string[];
 };
 
-export type TacticSource = "none" | "fmf-file" | "live-memory";
-
-export type TacticParserStatus =
-  | "not_imported"
-  | "imported_unparsed"
-  | "partially_parsed"
-  | "parsed"
-  | "unsupported_format"
-  | "invalid_file";
-
-export type TacticFileResult = {
-  success: boolean;
-  fileName: string | null;
-  fileSize: number | null;
-  importedAt: string | null;
-  parserStatus: TacticParserStatus;
-  parsedFormation: string | null;
-  parsedRoles: string[];
-  parsedDuties: string[];
-  detectedFormat: string | null;
-  compressed: boolean | null;
-  encoded: boolean | null;
-  warnings: string[];
-  errors: string[];
-};
+export type TacticSource = "none" | "live-memory";
 
 export type LiveFootballSnapshot = {
   status: LiveConnectorStatus;
@@ -148,13 +209,6 @@ export type LiveFootballSnapshot = {
   players: LivePlayer[];
   tactic: LiveTactic | null;
   tacticSource: TacticSource;
-  tacticFileStatus: TacticParserStatus;
-  tacticFileName: string | null;
-  tacticFileWarnings: string[];
-  tacticFileSize?: number | null;
-  tacticImportedAt?: string | null;
-  tacticFileErrors?: string[];
-  tacticDetectedFormat?: string | null;
   dataError: string | null;
   dataSource?: "none" | "live-memory";
   dataWarnings?: string[];
@@ -200,13 +254,16 @@ const desktopRequiredStatus: LiveConnectorStatus = {
   moduleBase: null,
   entityMapStatus: "not_checked",
   entityMapProfileId: null,
+  mappingSchemaVersion: 2,
+  mappingCoverage: [],
   pointerValidation: "not_run",
   handleAccessFlags: "Not available in browser",
   entityRoot: null,
   savePointer: null,
   managedClubPointer: null,
   playerCollectionPointer: null,
-  liveMemoryTacticRead: "disabled",
+  liveMemoryTacticRead: "not_run",
+  tacticManagerPointer: null,
   failureStage: null,
   lastSuccessfulRead: null,
   windowsErrorCode: null,
@@ -214,49 +271,6 @@ const desktopRequiredStatus: LiveConnectorStatus = {
   message: "GlassScout requires the installed Windows app to connect to the active FM26 game.",
   warnings: ["No live data is being simulated."],
 };
-
-const notImportedTactic: TacticFileResult = {
-  success: false,
-  fileName: null,
-  fileSize: null,
-  importedAt: null,
-  parserStatus: "not_imported",
-  parsedFormation: null,
-  parsedRoles: [],
-  parsedDuties: [],
-  detectedFormat: null,
-  compressed: null,
-  encoded: null,
-  warnings: [],
-  errors: [],
-};
-
-export function mergeTacticFile(
-  snapshot: LiveFootballSnapshot,
-  file: TacticFileResult,
-): LiveFootballSnapshot {
-  const hasParsedTactic = (
-    file.parserStatus === "parsed" || file.parserStatus === "partially_parsed"
-  ) && file.parsedFormation != null;
-  return {
-    ...snapshot,
-    tactic: hasParsedTactic ? {
-      name: file.fileName,
-      formation: file.parsedFormation ?? "Unavailable",
-      slots: [],
-      teamInstructions: [],
-      playerInstructionsReadable: false,
-    } : null,
-    tacticSource: file.success ? "fmf-file" : "none",
-    tacticFileStatus: file.parserStatus,
-    tacticFileName: file.fileName,
-    tacticFileWarnings: file.warnings,
-    tacticFileSize: file.fileSize,
-    tacticImportedAt: file.importedAt,
-    tacticFileErrors: file.errors,
-    tacticDetectedFormat: file.detectedFormat,
-  };
-}
 
 export const fm26LiveAdapter: FootballDataAdapter = {
   kind: "fm26-live",
@@ -288,9 +302,6 @@ export const fm26LiveAdapter: FootballDataAdapter = {
         players: [],
         tactic: null,
         tacticSource: "none",
-        tacticFileStatus: "not_imported",
-        tacticFileName: null,
-        tacticFileWarnings: [],
         dataError: desktopRequiredStatus.message,
         dataSource: "none",
         dataWarnings: desktopRequiredStatus.warnings,
@@ -299,11 +310,7 @@ export const fm26LiveAdapter: FootballDataAdapter = {
 
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      const [snapshot, tacticFile] = await Promise.all([
-        invoke<LiveFootballSnapshot>("load_active_save"),
-        invoke<TacticFileResult>("tactic_file_status").catch(() => notImportedTactic),
-      ]);
-      return mergeTacticFile(snapshot, tacticFile);
+      return await invoke<LiveFootballSnapshot>("load_active_save");
     } catch (error) {
       const message = error instanceof Error ? error.message : "The desktop connector could not be reached.";
       return {
@@ -315,9 +322,6 @@ export const fm26LiveAdapter: FootballDataAdapter = {
         players: [],
         tactic: null,
         tacticSource: "none",
-        tacticFileStatus: "not_imported",
-        tacticFileName: null,
-        tacticFileWarnings: [],
         dataError: message,
         dataSource: "none",
         dataWarnings: [message],
@@ -326,28 +330,102 @@ export const fm26LiveAdapter: FootballDataAdapter = {
   },
 };
 
-export async function chooseAndImportFmfTactic(): Promise<TacticFileResult | null> {
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
-    return {
-      ...notImportedTactic,
-      parserStatus: "invalid_file",
-      errors: ["FMF tactic import is available only in the installed Windows app."],
-    };
-  }
-  const [{ open }, { invoke }] = await Promise.all([
-    import("@tauri-apps/plugin-dialog"),
-    import("@tauri-apps/api/core"),
-  ]);
-  const selected = await open({
-    title: "Choose an FM26 tactic",
-    multiple: false,
-    directory: false,
-    filters: [{ name: "Football Manager tactic", extensions: ["fmf"] }],
-  });
-  if (selected == null || Array.isArray(selected)) {
-    return null;
-  }
-  return await invoke<TacticFileResult>("import_tactic_file", { path: selected });
+export type IndexedPlayerSearchResult = {
+  id: string;
+  name: string;
+  age?: number | null;
+  nationality?: string | null;
+  clubId?: string | null;
+  clubName?: string | null;
+  positions: string[];
+  managedSquad: boolean;
+  visibility: "known" | "unknown";
+  scoutKnowledge: "fully_known" | "partly_known" | "unknown";
+  scoutConfidence: number;
+  bestRole?: string | null;
+  roleFit?: number | null;
+  value?: string | null;
+  wage?: string | null;
+  contractStatus?: string | null;
+  contractRemaining?: string | null;
+  averageRating?: number | null;
+  minutesPlayed?: number | null;
+  goals?: number | null;
+  assists?: number | null;
+  transferInterest?: string | null;
+  loanInterest?: string | null;
+  transferAvailable?: boolean | null;
+  loanAvailable?: boolean | null;
+  notForSale?: boolean | null;
+  per90?: Record<string, number | null>;
+  rawStats?: Record<string, number | null>;
+  inPossessionFit?: number | null;
+  outOfPossessionFit?: number | null;
+  projectedInPossessionFit?: number | null;
+  projectedOutOfPossessionFit?: number | null;
+  efficiencyScore?: number | null;
+  marketValueAmount?: number | null;
+};
+
+export async function searchIndexedPlayers(query: string): Promise<IndexedPlayerSearchResult[]> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<IndexedPlayerSearchResult[]>("search_indexed_players", { query });
+}
+
+export async function indexedPlayersByIds(playerIds: string[]): Promise<IndexedPlayerSearchResult[]> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window) || playerIds.length === 0) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<IndexedPlayerSearchResult[]>("indexed_players_by_ids", { playerIds });
+}
+
+export async function indexedPlayerProfile(playerId: string): Promise<LivePlayer | null> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<LivePlayer | null>("indexed_player_profile", { playerId });
+}
+
+export type MappingLabStatus = {
+  enabled: boolean;
+  readOnly: boolean;
+  maximumWindowBytes: number;
+  evidenceDirectory: string | null;
+  message: string;
+};
+
+export type MappingLabCaptureResult = {
+  success: boolean;
+  snapshotId: string;
+  evidenceFile: string;
+  playerId: string;
+  playerName: string;
+  windowsCaptured: number;
+  bytesCaptured: number;
+};
+
+export async function getMappingLabStatus(): Promise<MappingLabStatus | null> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MappingLabStatus>("mapping_lab_status");
+}
+
+export async function captureMappingEvidence(playerId: string, label: string): Promise<MappingLabCaptureResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MappingLabCaptureResult>("mapping_lab_capture", { playerId, label, windowSize: 1024 });
+}
+
+export type MappingLabComparisonResult = {
+  success: boolean;
+  firstSnapshotId: string;
+  secondSnapshotId: string;
+  changedBytes: number;
+  unchangedBytes: number;
+  evidenceFile: string;
+};
+
+export async function compareMappingEvidence(firstSnapshotId: string, secondSnapshotId: string): Promise<MappingLabComparisonResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MappingLabComparisonResult>("mapping_lab_compare", { firstSnapshotId, secondSnapshotId });
 }
 
 export const realLifeAdapter: FutureRealLifeAdapter = {

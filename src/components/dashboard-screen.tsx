@@ -89,18 +89,20 @@ export function DashboardScreen({
     {
       icon: snapshot.tactic ? ClipboardCheck : FileWarning,
       title: snapshot.tactic ? `${snapshot.tactic.formation} tactic ready` : "Tactical decoding needs attention",
-      detail: snapshot.tacticFileName
-        ? `${snapshot.tacticFileName} is stored safely, but this FMF format is not decoded.`
-        : "Import the active FMF tactic to enable role and tactical-fit analysis.",
-      action: snapshot.tactic ? "Open board" : "Import tactic",
+      detail: snapshot.status.liveMemoryTacticRead === "object_detected_unmapped"
+        ? "The active live tactic object is detected; selected slots did not validate on this read."
+        : snapshot.tactic
+          ? "Formation and selected XI are mapped from the active FM26 tactic. Role codes are pending."
+        : "Open FM26 and select the active tactic so GlassScout can inspect the live object.",
+      action: "Open board",
       screen: "Tactical Board" as Screen,
     },
     {
       icon: ShieldCheck,
-      title: `${squad.length} managed-club players visibility-safe`,
-      detail: "Names and positions are live; unsupported fields remain Unknown.",
+      title: `${squad.length} managed-club players mapped`,
+      detail: "IDs, ages, nations, positions, feet and visible attributes are live; unsupported fields remain Unknown.",
       action: "Open squad",
-      screen: "Squad Planner" as Screen,
+      screen: "Squad" as Screen,
     },
   ];
 
@@ -110,19 +112,19 @@ export function DashboardScreen({
         <TacticalBoard snapshot={snapshot} compact />
 
         <section className="command-panel recruitment-pulse">
-          <header><h2>Recruitment pulse</h2><span>{externalVisible.length} live targets</span></header>
+          <header><h2>Scout Room pulse</h2><span>{externalVisible.length} live targets</span></header>
           <div className="recruitment-pulse-empty">
             <span className="target-avatar"><SearchCheck /></span>
             <div>
-              <strong>No visibility-safe external targets yet</strong>
+              <strong>Search the indexed player database</strong>
               <p>
                 {snapshot.status.backgroundPlayersIndexed
-                  ? `${snapshot.status.backgroundPlayersIndexed} wider-save records are indexed but hidden until club knowledge is mapped.`
+                  ? `${snapshot.status.backgroundPlayersIndexed} wider-save records are searchable. Unknown details stay unknown until scout knowledge exists.`
                   : "Load the active save to build the wider player index."}
               </p>
             </div>
           </div>
-          <Button variant="outline" onClick={() => onNavigate("Recruitment")}>
+          <Button variant="outline" onClick={() => onNavigate("Scout Room")}>
             <SearchCheck data-icon="inline-start" />Plan recruitment
           </Button>
         </section>

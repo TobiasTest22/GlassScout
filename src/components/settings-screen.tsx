@@ -1,8 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ChevronDown, Cpu, Database, LockKeyhole, RefreshCw } from "lucide-react";
 import type { LiveFootballSnapshot } from "@/domain/adapters";
+import { captureMappingEvidence, compareMappingEvidence, getMappingLabStatus, type MappingLabCaptureResult, type MappingLabComparisonResult, type MappingLabStatus } from "@/domain/adapters";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export function SettingsScreen({
   snapshot,
@@ -14,6 +17,31 @@ export function SettingsScreen({
   onRefresh: () => Promise<unknown>;
 }) {
   const status = snapshot.status;
+  const [mappingLab, setMappingLab] = useState<MappingLabStatus | null>(null);
+  const [mappingTarget, setMappingTarget] = useState("");
+  const [mappingLabel, setMappingLabel] = useState("");
+  const [capture, setCapture] = useState<MappingLabCaptureResult | null>(null);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const [firstSnapshot, setFirstSnapshot] = useState("");
+  const [secondSnapshot, setSecondSnapshot] = useState("");
+  const [comparison, setComparison] = useState<MappingLabComparisonResult | null>(null);
+  useEffect(() => { getMappingLabStatus().then(setMappingLab).catch(() => setMappingLab(null)); }, []);
+  const captureEvidence = async () => {
+    setCaptureError(null);
+    try {
+      setCapture(await captureMappingEvidence(mappingTarget, mappingLabel));
+    } catch (error) {
+      setCaptureError(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const compareEvidence = async () => {
+    setCaptureError(null);
+    try {
+      setComparison(await compareMappingEvidence(firstSnapshot, secondSnapshot));
+    } catch (error) {
+      setCaptureError(error instanceof Error ? error.message : String(error));
+    }
+  };
   return (
     <main className="screen settings-screen">
       <div className="planner-heading">
@@ -36,6 +64,7 @@ export function SettingsScreen({
           <div><dt>Module base</dt><dd>{status.moduleBase ?? "Unavailable"}</dd></div>
           <div><dt>Memory probe</dt><dd>{status.executableHeaderValid ? `Passed · ${status.bytesRead} bytes` : "Not verified"}</dd></div>
           <div><dt>Entity map</dt><dd>{status.entityMapStatus === "matched" ? status.entityMapProfileId : status.entityMapStatus ?? "Not checked"}</dd></div>
+          <div><dt>Mapping schema</dt><dd>v{status.mappingSchemaVersion ?? 2}</dd></div>
           <div><dt>Pointer validation</dt><dd>{status.pointerValidation?.replaceAll("_", " ") ?? "Not run"}</dd></div>
           <div><dt>Active save</dt><dd>{status.saveDetected === true ? "Detected" : "Not readable"}</dd></div>
           <div><dt>Read-only access flags</dt><dd>{status.handleAccessFlags ?? "Unavailable"}</dd></div>
@@ -48,18 +77,39 @@ export function SettingsScreen({
           <div><dt>Managed squad players</dt><dd>{status.managedSquadPlayers}</dd></div>
           <div><dt>Player records indexed</dt><dd>{status.databasePlayersIndexed}</dd></div>
           <div><dt>Background records gated</dt><dd>{status.backgroundPlayersIndexed}</dd></div>
-          <div><dt>Visibility-safe players</dt><dd>{status.visiblePlayersLoaded}</dd></div>
+          <div><dt>Readable player profiles</dt><dd>{status.visiblePlayersLoaded}</dd></div>
           <div><dt>Fully scouted players</dt><dd>{status.fullyScoutedPlayers}</dd></div>
           <div><dt>Partial scout reports</dt><dd>{status.partialScoutReports}</dd></div>
           <div><dt>Live memory tactic read</dt><dd>{status.liveMemoryTacticRead ?? "disabled"}</dd></div>
+          <div><dt>Tactic manager</dt><dd>{status.tacticManagerPointer ?? "Unavailable"}</dd></div>
           <div><dt>Tactic source</dt><dd>{snapshot.tacticSource.replaceAll("_", " ")}</dd></div>
-          <div><dt>FMF parser status</dt><dd>{snapshot.tacticFileStatus.replaceAll("_", " ")}</dd></div>
-          <div><dt>Imported FMF</dt><dd>{snapshot.tacticFileName ?? "None"}</dd></div>
           <div><dt>Last successful read</dt><dd>{status.lastSuccessfulRead?.replaceAll("_", " ") ?? "None"}</dd></div>
           <div><dt>Failure stage</dt><dd>{status.failureStage?.replaceAll("_", " ") ?? "None"}</dd></div>
           <div><dt>Windows error</dt><dd>{status.windowsErrorCode ?? "None"}</dd></div>
           <div className="diagnostic-hash"><dt>Executable SHA-256</dt><dd>{status.executableSha256 ?? "Unavailable"}</dd></div>
         </dl>
+        <section className="mapping-coverage">
+          <header><strong>Exact-build mapping coverage</strong><span>Only validated fields enter the live product.</span></header>
+          {(status.mappingCoverage ?? []).map((item) => (
+            <article key={item.section}>
+              <strong>{item.section}</strong>
+              <span className="coverage-good">{item.validated} validated</span>
+              <span className="coverage-watch">{item.candidate} candidates</span>
+              <span>{item.unmapped} unmapped</span>
+            </article>
+          ))}
+        </section>
+        {mappingLab?.enabled ? (
+          <section className="mapping-lab-panel">
+            <header><strong>Developer Mapping Lab</strong><span>Read-only · bounded to {mappingLab.maximumWindowBytes} bytes per object</span></header>
+            <p>{mappingLab.message}</p>
+            <div><Input aria-label="Mapping player" placeholder="Exact player name or FM ID" value={mappingTarget} onChange={(event) => setMappingTarget(event.target.value)} /><Input aria-label="Mapping evidence label" placeholder="Controlled state label" value={mappingLabel} onChange={(event) => setMappingLabel(event.target.value)} /><Button variant="outline" disabled={!mappingTarget.trim()} onClick={captureEvidence}>Capture local evidence</Button></div>
+            {capture ? <small>Saved {capture.windowsCaptured} windows ({capture.bytesCaptured} bytes) to {capture.evidenceFile}</small> : null}
+            <div><Input aria-label="First snapshot ID" placeholder="First snapshot ID" value={firstSnapshot} onChange={(event) => setFirstSnapshot(event.target.value)} /><Input aria-label="Second snapshot ID" placeholder="Second snapshot ID" value={secondSnapshot} onChange={(event) => setSecondSnapshot(event.target.value)} /><Button variant="outline" disabled={!firstSnapshot || !secondSnapshot} onClick={compareEvidence}>Compare snapshots</Button></div>
+            {comparison ? <small>Diff: {comparison.changedBytes} changed, {comparison.unchangedBytes} unchanged bytes. Evidence: {comparison.evidenceFile}</small> : null}
+            {captureError ? <small className="mapping-lab-error">{captureError}</small> : null}
+          </section>
+        ) : null}
         <div className="advanced-diagnostic-message"><strong>Connector result</strong><span>{status.message}</span></div>
       </details>
     </main>
