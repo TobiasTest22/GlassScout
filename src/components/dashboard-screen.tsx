@@ -90,7 +90,9 @@ export function DashboardScreen({
       icon: snapshot.tactic ? ClipboardCheck : FileWarning,
       title: snapshot.tactic ? `${snapshot.tactic.formation} tactic ready` : "Tactical decoding needs attention",
       detail: snapshot.status.liveMemoryTacticRead === "object_detected_unmapped"
-        ? "The active live tactic object is detected; its packed formation and phase-role layout is not yet validated."
+        ? "The active live tactic object is detected; selected slots did not validate on this read."
+        : snapshot.tactic
+          ? "Formation and selected XI are mapped from the active FM26 tactic. Role codes are pending."
         : "Open FM26 and select the active tactic so GlassScout can inspect the live object.",
       action: "Open board",
       screen: "Tactical Board" as Screen,

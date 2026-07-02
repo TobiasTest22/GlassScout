@@ -5,4 +5,5 @@ pub(crate) mod permissions;
 pub(crate) mod process;
 pub(crate) mod scanner;
 pub(crate) mod structs;
+pub(crate) mod tactics;
 pub(crate) mod validator;

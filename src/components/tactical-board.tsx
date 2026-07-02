@@ -44,7 +44,7 @@ export function TacticalBoard({
       <header className="tactical-board-header">
         <div>
           <h2>{compact ? "System overview" : "Tactical board"}</h2>
-          {!compact ? <p>Formation, roles and duties are shown only after live-memory validation.</p> : null}
+          {!compact ? <p>Formation and selected XI are read from live FM26 memory. Roles and duties appear once their packed codes validate.</p> : null}
         </div>
         <div className="phase-toggle" role="group" aria-label="Tactical phase">
           {(["In Possession", "Out of Possession", "Combined"] as const).map((item) => (
@@ -70,7 +70,7 @@ export function TacticalBoard({
             <button key={`${slot.position}-${index}`} className="pitch-player" style={{ left: `${left}%`, top: `${top}%` }} onClick={() => player && onOpenPlayer?.(player.id)} disabled={!player}>
               <span className="fit-ring" style={{ "--fit": `${fit ?? 0}%` } as CSSProperties} data-known={fit != null}>{fit ?? "—"}</span>
               <strong>{player?.name ?? "Unassigned"}</strong>
-              <small>{slot.position} · {slot.role ?? "Role unknown"}{slot.duty ? ` · ${slot.duty}` : ""}</small>
+              <small>{slot.position} · {slot.role ?? "Role pending"}{slot.duty ? ` · ${slot.duty}` : ""}</small>
             </button>
           );
         })}
@@ -78,7 +78,7 @@ export function TacticalBoard({
         {!slots.length ? (
           <div className="pitch-empty">
             <ShieldAlert />
-            <strong>{snapshot.status.liveMemoryTacticRead === "object_detected_unmapped" ? "Live tactic detected — layout not validated" : "Waiting for active FM26 tactic"}</strong>
+            <strong>{snapshot.status.liveMemoryTacticRead === "object_detected_unmapped" ? "Live tactic detected — slot decoder pending" : "Waiting for active FM26 tactic"}</strong>
             <span>GlassScout will not invent a formation, role, duty, instruction or first XI.</span>
           </div>
         ) : null}

@@ -1,6 +1,6 @@
 [package]
 name = "glassscout-fm26"
-version = "0.1.8"
+version = "0.1.9"
 description = "Read-only desktop recruitment workspace for Football Manager 2026"
 authors = ["GlassScout"]
 edition = "2021"

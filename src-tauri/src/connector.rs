@@ -20,6 +20,7 @@ use crate::{
         process::find_fm26_process,
         scanner::{parse_pattern, scan_module, scan_private_memory_for_pointers},
         structs::{FmDate, PLAYER_ATTRIBUTE_NAMES, POSITION_NAMES},
+        tactics::tactic_formation_template,
         validator,
     },
 };
@@ -111,6 +112,7 @@ struct LiveData {
     season: Option<String>,
     clubs: Vec<Value>,
     players: Vec<Value>,
+    tactic: Option<Value>,
     database_players_indexed: u32,
     background_players_indexed: u32,
     database_index_status: &'static str,
@@ -510,7 +512,9 @@ fn collect_snapshot(
             status.database_scope = data.database_scope;
             status.clubs_loaded = data.clubs.len() as u32;
             status.pointer_validation = "passed";
-            status.live_memory_tactic_read = if data.tactic_manager_pointer.is_some() {
+            status.live_memory_tactic_read = if data.tactic.is_some() {
+                "ready"
+            } else if data.tactic_manager_pointer.is_some() {
                 "object_detected_unmapped"
             } else {
                 "object_not_found"
@@ -535,8 +539,12 @@ fn collect_snapshot(
                 season: data.season,
                 clubs: data.clubs,
                 players: data.players,
-                tactic: None,
-                tactic_source: "none",
+                tactic_source: if data.tactic.is_some() {
+                    "live-memory"
+                } else {
+                    "none"
+                },
+                tactic: data.tactic,
                 data_error: None,
                 data_source: "live-memory",
                 data_warnings: data.warnings,
@@ -982,6 +990,7 @@ fn extract_live_data(
         }));
     }
     diagnostics.last_successful_read = Some("extract_managed_squad".to_string());
+    let managed_tactic_records = managed_index_records.clone();
 
     let (
         database_players_indexed,
@@ -1043,11 +1052,17 @@ fn extract_live_data(
             object.remove("_season");
         }
     }
+    let tactic = tactic_manager_pointer
+        .and_then(|pointer| extract_live_tactic(reader, pointer, &managed_tactic_records));
     let mut warnings = vec![
         "Managed-squad IDs, names, dates of birth, ages, nationality, positions, preferred foot and visible attributes are validated for this FM26 build. Hidden CA/PA is never read or scored.".to_string(),
         "Form, match ratings, contract, wage, valuation, fitness and squad-status relationships are not yet validated for this build and remain Unknown.".to_string(),
         "Own-squad players are fully known. Wider-save records remain hidden until FM26 scout-report visibility, ranges and confidence are validated.".to_string(),
-        "The live FM26 tactic manager is detected with read-only access. Packed formation, phase-role and instruction layouts are not yet validated, so no tactic is guessed.".to_string(),
+        if tactic.is_some() {
+            "Live FM26 tactic formation and selected XI slots are mapped from the active tactic manager. Packed role, duty and instruction codes are still pending validation.".to_string()
+        } else {
+            "The live FM26 tactic manager is detected with read-only access, but the selected-slot block did not validate for this read. No tactic is guessed.".to_string()
+        },
         "The FM26 shortlist collection is not mapped safely. GlassScout Favorites remains a local list resolved against live players.".to_string(),
     ];
     if include_database_index && database_index_status == "ready" {
@@ -1072,6 +1087,7 @@ fn extract_live_data(
         season,
         clubs,
         players,
+        tactic,
         database_players_indexed,
         background_players_indexed,
         database_index_status,
@@ -1079,6 +1095,180 @@ fn extract_live_data(
         warnings,
         tactic_manager_pointer,
     })
+}
+
+#[cfg(target_os = "windows")]
+const TACTIC_FORMATION_CODE_OFFSET: u64 = 0x03D4;
+#[cfg(target_os = "windows")]
+const TACTIC_SELECTION_POINTER_OFFSETS: [u64; 3] = [0x41B8, 0x41C0, 0x41C8];
+
+#[cfg(target_os = "windows")]
+fn extract_live_tactic(
+    reader: &mut ProcessReader,
+    tactic_manager_pointer: u64,
+    managed_records: &[IndexedPlayerRecord],
+) -> Option<Value> {
+    let formation_code = reader.read_u32(tactic_manager_pointer + TACTIC_FORMATION_CODE_OFFSET)?;
+    let template = tactic_formation_template(formation_code)?;
+    let selection = find_live_tactic_selection(
+        reader,
+        tactic_manager_pointer,
+        managed_records,
+        template.positions.len(),
+    )?;
+    let managed_by_person = managed_records
+        .iter()
+        .map(|record| (record.person_address, record))
+        .collect::<HashMap<_, _>>();
+    let mut slots = Vec::with_capacity(template.positions.len());
+
+    for (index, position) in template.positions.iter().enumerate() {
+        let person_pointer = selection.person_pointers[index];
+        let record = managed_by_person.get(&person_pointer).copied();
+        slots.push(json!({
+            "playerId": record.map(|record| record.id.clone()),
+            "position": position,
+            "role": null,
+            "duty": null,
+            "personPointer": if person_pointer == 0 { None } else { Some(hex_address(person_pointer)) },
+            "decoderStatus": if record.is_some() { "player-slot-validated" } else { "player-slot-unresolved" }
+        }));
+    }
+
+    let warnings = if template.exact_shape {
+        vec![
+            "Formation and selected XI slots are decoded from live FM26 memory.",
+            "Packed role, duty, phase-layout and instruction codes are not validated yet, so GlassScout does not invent them.",
+        ]
+    } else {
+        vec![
+            "The FM26 formation code is known, but this formation's exact pitch slot template is not validated yet.",
+            "Selected XI is decoded from live FM26 memory; pitch placement uses neutral slot labels until the formation template is mapped.",
+        ]
+    };
+    Some(json!({
+        "name": null,
+        "formation": template.label,
+        "formationEnum": template.enum_name,
+        "formationCode": formation_code,
+        "slots": slots,
+        "teamInstructions": [],
+        "playerInstructionsReadable": false,
+        "decoderStatus": if template.exact_shape { "formation-shape-and-selected-xi-validated" } else { "selected-xi-validated-template-pending" },
+        "layoutStatus": if template.exact_shape { "exact-template" } else { "formation-name-only" },
+        "selectionPointer": hex_address(selection.base_address + selection.offset),
+        "selectionStride": selection.stride,
+        "selectionResolvedPlayers": selection.resolved_players,
+        "warnings": warnings
+    }))
+}
+
+#[cfg(target_os = "windows")]
+struct TacticSelection {
+    base_address: u64,
+    offset: u64,
+    stride: u64,
+    person_pointers: Vec<u64>,
+    resolved_players: usize,
+}
+
+#[cfg(target_os = "windows")]
+fn find_live_tactic_selection(
+    reader: &mut ProcessReader,
+    tactic_manager_pointer: u64,
+    managed_records: &[IndexedPlayerRecord],
+    slot_count: usize,
+) -> Option<TacticSelection> {
+    let managed_people = managed_records
+        .iter()
+        .map(|record| record.person_address)
+        .collect::<HashSet<_>>();
+    let mut candidates = Vec::new();
+    candidates.push(tactic_manager_pointer);
+    for pointer_offset in TACTIC_SELECTION_POINTER_OFFSETS {
+        if let Some(pointer) = reader
+            .read_pointer(tactic_manager_pointer + pointer_offset)
+            .filter(|pointer| plausible_process_pointer(*pointer))
+        {
+            candidates.push(pointer);
+        }
+    }
+    if let Some(bytes) = reader.read_bytes(tactic_manager_pointer, 0x6000) {
+        for offset in (0..bytes.len().saturating_sub(8)).step_by(8) {
+            let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().ok()?);
+            if plausible_process_pointer(pointer) {
+                candidates.push(pointer);
+            }
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+
+    let mut best: Option<TacticSelection> = None;
+    for base_address in candidates {
+        let Some(bytes) = read_bounded_window(reader, base_address) else {
+            continue;
+        };
+        for stride in [8_u64, 0x48] {
+            let needed = (slot_count.saturating_sub(1) as u64)
+                .saturating_mul(stride)
+                .saturating_add(8) as usize;
+            if bytes.len() < needed {
+                continue;
+            }
+            let max_start = bytes.len().saturating_sub(needed);
+            for start in (0..=max_start).step_by(8) {
+                let mut pointers = Vec::with_capacity(slot_count);
+                let mut resolved = 0_usize;
+                let mut plausible = 0_usize;
+                for index in 0..slot_count {
+                    let offset = start + (index as u64 * stride) as usize;
+                    let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().ok()?);
+                    if plausible_process_pointer(pointer) {
+                        plausible += 1;
+                    }
+                    if managed_people.contains(&pointer) {
+                        resolved += 1;
+                    }
+                    pointers.push(pointer);
+                }
+                if resolved < 8 || plausible < 10 {
+                    continue;
+                }
+                let replace = best
+                    .as_ref()
+                    .is_none_or(|current| resolved > current.resolved_players);
+                if replace {
+                    best = Some(TacticSelection {
+                        base_address,
+                        offset: start as u64,
+                        stride,
+                        person_pointers: pointers,
+                        resolved_players: resolved,
+                    });
+                    if resolved == slot_count {
+                        return best;
+                    }
+                }
+            }
+        }
+    }
+    best
+}
+
+#[cfg(target_os = "windows")]
+fn read_bounded_window(reader: &mut ProcessReader, base_address: u64) -> Option<Vec<u8>> {
+    for size in [0x4000_usize, 0x2000, 0x1000] {
+        if let Some(bytes) = reader.read_bytes(base_address, size) {
+            return Some(bytes);
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn plausible_process_pointer(pointer: u64) -> bool {
+    (0x10000000000..0x0000_8000_0000_0000).contains(&pointer)
 }
 
 #[cfg(target_os = "windows")]
@@ -1637,11 +1827,14 @@ mod tests {
         assert_eq!(snapshot.status.database_scope, "full-save-index");
         assert!(snapshot.status.database_players_indexed >= snapshot.status.managed_squad_players);
         assert!(snapshot.status.background_players_indexed > 0);
-        assert_eq!(
-            snapshot.status.live_memory_tactic_read,
-            "object_detected_unmapped"
-        );
+        assert_eq!(snapshot.status.live_memory_tactic_read, "ready");
         assert!(snapshot.status.tactic_manager_pointer.is_some());
+        let tactic = snapshot.tactic.as_ref().expect("live tactic");
+        assert!(tactic["formation"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()));
+        assert_eq!(tactic["slots"].as_array().map(Vec::len), Some(11));
+        assert_eq!(snapshot.tactic_source, "live-memory");
         assert_eq!(
             snapshot.status.visible_players_loaded,
             snapshot.players.len() as u32
@@ -1722,5 +1915,383 @@ mod tests {
             ..candidate
         };
         assert!(field_is_publishable(&validated));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore]
+    fn debug_live_tactic_contract_windows() {
+        if find_fm26_process().is_none() {
+            println!("FM26 is not running.");
+            return;
+        }
+        let snapshot = collect_snapshot(true, None);
+        println!(
+            "snapshot state={} message={}",
+            snapshot.status.state, snapshot.status.message
+        );
+        assert_eq!(snapshot.status.state, "connected");
+
+        let index = PLAYER_DATABASE_INDEX
+            .get()
+            .expect("player index")
+            .read()
+            .expect("player index lock");
+        let process_id = index.process_id;
+        let mut managed = index
+            .records
+            .values()
+            .filter(|record| record.managed_squad)
+            .cloned()
+            .collect::<Vec<_>>();
+        managed.sort_by(|left, right| left.name.cmp(&right.name));
+        drop(index);
+        let active_tactic_name_needles = [
+            "Sveingard",
+            "Jelsa",
+            "Sallabegolli",
+            "Osland",
+            "Romvig",
+            "Rabenorolahy",
+            "Sandtorv",
+            "Bergset",
+            "Helgevold",
+            "Thulin",
+            "Marchewka",
+        ];
+        let active_tactic_records = managed
+            .iter()
+            .filter(|record| {
+                active_tactic_name_needles
+                    .iter()
+                    .any(|needle| record.name.contains(needle))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut reader = ProcessReader::open(process_id).expect("open FM26");
+        let process_path = reader.process_path().expect("process path");
+        let identity = read_executable_identity(&process_path);
+        let profile = find_entity_map(
+            identity.file_version.as_deref(),
+            identity.product_version.as_deref(),
+            identity.sha256.as_deref(),
+            identity.architecture.as_deref(),
+        )
+        .expect("entity map");
+        let module = reader.module(&profile.module).expect("game module");
+        let player_vtable = reader
+            .read_pointer(managed[0].raw_player_address)
+            .expect("player vtable");
+        let tactic_vtable = module.base + profile.constants.tactics_manager_vtable_rva;
+        let mut scan_needles = vec![player_vtable, tactic_vtable];
+        for record in &active_tactic_records {
+            scan_needles.push(record.raw_player_address);
+            scan_needles.push(record.person_address);
+            if let Some(contract_address) = record.contract_address {
+                scan_needles.push(contract_address);
+            }
+        }
+        let mut hits = scan_private_memory_for_pointers(&mut reader, &scan_needles)
+            .expect("scan private memory");
+        let player_hits = hits.remove(&player_vtable).unwrap_or_default();
+        let tactic_hits = hits.remove(&tactic_vtable).unwrap_or_default();
+        println!(
+            "player_vtable={} hits={} tactic_vtable={} hits={:?}",
+            hex_address(player_vtable),
+            player_hits.len(),
+            hex_address(tactic_vtable),
+            tactic_hits
+                .iter()
+                .take(8)
+                .map(|value| hex_address(*value))
+                .collect::<Vec<_>>()
+        );
+        println!("active tactic player pointer hits:");
+        let mut clustered_hits = Vec::new();
+        for record in &active_tactic_records {
+            for (kind, pointer) in [
+                ("raw", Some(record.raw_player_address)),
+                ("person", Some(record.person_address)),
+                ("contract", record.contract_address),
+            ] {
+                let Some(pointer) = pointer else {
+                    continue;
+                };
+                let found = hits.remove(&pointer).unwrap_or_default();
+                println!(
+                    "  {} {} {kind}={} hits={}",
+                    record.id,
+                    record.name,
+                    hex_address(pointer),
+                    found.len()
+                );
+                for address in found.into_iter().take(64) {
+                    clustered_hits.push((address, format!("{kind}:{} {}", record.id, record.name)));
+                }
+            }
+        }
+        clustered_hits.sort_by_key(|(address, _)| *address);
+        let mut page_counts: HashMap<u64, Vec<String>> = HashMap::new();
+        for (address, label) in clustered_hits {
+            page_counts
+                .entry(address & !0xfff)
+                .or_default()
+                .push(format!("{}@{}", label, hex_address(address)));
+        }
+        let mut clusters = page_counts.into_iter().collect::<Vec<_>>();
+        clusters.sort_by(|left, right| right.1.len().cmp(&left.1.len()));
+        println!("active tactic pointer clusters:");
+        for (page, labels) in clusters
+            .into_iter()
+            .take(30)
+            .filter(|(_, labels)| labels.len() >= 2)
+        {
+            println!(
+                "  page={} count={} {:?}",
+                hex_address(page),
+                labels.len(),
+                labels
+            );
+        }
+
+        if let Some(tactic_object) = tactic_hits.first().copied() {
+            let bytes = reader
+                .read_bytes(tactic_object, 8192)
+                .expect("tactic manager window");
+            println!("tactic_object={}", hex_address(tactic_object));
+            println!("small tactic i32/u32 values:");
+            for offset in (0..bytes.len()).step_by(4) {
+                let signed = i32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                let unsigned = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                if (-1..=100).contains(&signed) {
+                    println!("  off={offset:04X} i32={signed} u32={unsigned}");
+                }
+            }
+            println!("tactic pointer-like fields:");
+            for offset in (0..2048).step_by(8) {
+                let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+                if (0x10000000000..0x0000_8000_0000_0000).contains(&pointer) {
+                    let first_u32 = reader.read_u32(pointer).unwrap_or_default();
+                    let first_ptr = reader.read_pointer(pointer).unwrap_or_default();
+                    println!(
+                        "  off={offset:04X} ptr={} first_u32={} first_ptr={}",
+                        hex_address(pointer),
+                        first_u32,
+                        hex_address(first_ptr)
+                    );
+                }
+            }
+
+            let large_bytes = reader
+                .read_bytes(tactic_object, 0x8000)
+                .expect("large tactic manager window");
+            println!("managed players for tactic matching:");
+            for record in &managed {
+                println!(
+                    "  {} {} raw={} person={} contract={}",
+                    record.id,
+                    record.name,
+                    hex_address(record.raw_player_address),
+                    hex_address(record.person_address),
+                    record
+                        .contract_address
+                        .map(hex_address)
+                        .unwrap_or_else(|| "none".to_string())
+                );
+            }
+            print_player_reference_hits("tactic-manager", tactic_object, &large_bytes, &managed);
+            print_role_like_runs("tactic-manager", tactic_object, &large_bytes);
+
+            let mut child_targets = Vec::new();
+            for offset in (0..0x1000).step_by(8) {
+                let pointer =
+                    u64::from_le_bytes(large_bytes[offset..offset + 8].try_into().unwrap());
+                if (0x10000000000..0x0000_8000_0000_0000).contains(&pointer)
+                    && !child_targets.contains(&pointer)
+                {
+                    child_targets.push(pointer);
+                }
+            }
+            println!("tactic child pointer probes:");
+            for (index, target) in child_targets.into_iter().take(96).enumerate() {
+                let Some(child_bytes) = reader.read_bytes(target, 0x1000) else {
+                    continue;
+                };
+                let label = format!("child#{index:02}");
+                let player_hits = count_player_reference_hits(target, &child_bytes, &managed);
+                let role_hits = count_role_like_runs(&child_bytes);
+                if player_hits > 0 || role_hits > 0 {
+                    println!(
+                        "  {label} base={} player_hits={} role_runs={}",
+                        hex_address(target),
+                        player_hits,
+                        role_hits
+                    );
+                    print_player_reference_hits(&label, target, &child_bytes, &managed);
+                    print_role_like_runs(&label, target, &child_bytes);
+                }
+            }
+        }
+
+        println!("managed contract windows:");
+        for record in managed.iter().take(12) {
+            let Some(contract) = record.contract_address else {
+                println!("{} {} no contract", record.id, record.name);
+                continue;
+            };
+            let bytes = reader.read_bytes(contract, 1024).expect("contract window");
+            let mut small_values = Vec::new();
+            let mut date_candidates = Vec::new();
+            for offset in (0..bytes.len()).step_by(4) {
+                let signed = i32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                let unsigned = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                if (0..=5_000_000).contains(&signed) {
+                    small_values.push(format!("{offset:03X}:{signed}"));
+                }
+                let day = u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap());
+                let year = u16::from_le_bytes(bytes[offset + 2..offset + 4].try_into().unwrap());
+                if (1..=366).contains(&day) && (2026..=2045).contains(&year) {
+                    date_candidates.push(format!("{offset:03X}:{year}-{day} raw={unsigned}"));
+                }
+            }
+            println!(
+                "{} {} contract={} vtable={} dates=[{}] values=[{}]",
+                record.id,
+                record.name,
+                hex_address(contract),
+                hex_address(reader.read_pointer(contract).unwrap_or_default()),
+                date_candidates.join(", "),
+                small_values.join(" ")
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn print_player_reference_hits(
+        label: &str,
+        base: u64,
+        bytes: &[u8],
+        records: &[IndexedPlayerRecord],
+    ) {
+        for offset in (0..bytes.len().saturating_sub(8)).step_by(8) {
+            let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+            for record in records {
+                if pointer == record.raw_player_address {
+                    println!(
+                        "    {label}+{offset:04X}: raw_player -> {} {}",
+                        record.id, record.name
+                    );
+                }
+                if pointer == record.person_address {
+                    println!(
+                        "    {label}+{offset:04X}: person -> {} {}",
+                        record.id, record.name
+                    );
+                }
+                if Some(pointer) == record.contract_address {
+                    println!(
+                        "    {label}+{offset:04X}: contract -> {} {}",
+                        record.id, record.name
+                    );
+                }
+            }
+        }
+        for offset in (0..bytes.len().saturating_sub(4)).step_by(4) {
+            let uid = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+            for record in records {
+                if record.id.parse::<u32>().ok() == Some(uid) {
+                    println!(
+                        "    {label}+{offset:04X}: uid -> {} {}",
+                        record.id, record.name
+                    );
+                }
+            }
+        }
+        let _ = base;
+    }
+
+    #[cfg(target_os = "windows")]
+    fn count_player_reference_hits(
+        _base: u64,
+        bytes: &[u8],
+        records: &[IndexedPlayerRecord],
+    ) -> usize {
+        let mut hits = 0;
+        for offset in (0..bytes.len().saturating_sub(8)).step_by(8) {
+            let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+            hits += records
+                .iter()
+                .filter(|record| {
+                    pointer == record.raw_player_address
+                        || pointer == record.person_address
+                        || Some(pointer) == record.contract_address
+                })
+                .count();
+        }
+        for offset in (0..bytes.len().saturating_sub(4)).step_by(4) {
+            let uid = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+            hits += records
+                .iter()
+                .filter(|record| record.id.parse::<u32>().ok() == Some(uid))
+                .count();
+        }
+        hits
+    }
+
+    #[cfg(target_os = "windows")]
+    fn print_role_like_runs(label: &str, base: u64, bytes: &[u8]) {
+        let expected_roles = [1_u32, 3, 7, 8, 10, 14, 22, 25, 26, 38];
+        for start in (0..bytes.len().saturating_sub(64)).step_by(4) {
+            let mut values = Vec::new();
+            for offset in (start..start + 64).step_by(4) {
+                let value = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                values.push(value);
+            }
+            let bounded = values
+                .iter()
+                .filter(|value| **value <= 45 || **value == u32::MAX)
+                .count();
+            let role_matches = values
+                .iter()
+                .filter(|value| expected_roles.contains(value))
+                .count();
+            let non_zero = values.iter().filter(|value| **value != 0).count();
+            if bounded >= 12 && role_matches >= 3 && non_zero >= 5 {
+                let absolute = base + start as u64;
+                println!(
+                    "    {label}+{start:04X} abs={} values={:?}",
+                    hex_address(absolute),
+                    values
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn count_role_like_runs(bytes: &[u8]) -> usize {
+        let expected_roles = [1_u32, 3, 7, 8, 10, 14, 22, 25, 26, 38];
+        let mut runs = 0;
+        for start in (0..bytes.len().saturating_sub(64)).step_by(4) {
+            let mut values = Vec::new();
+            for offset in (start..start + 64).step_by(4) {
+                values.push(u32::from_le_bytes(
+                    bytes[offset..offset + 4].try_into().unwrap(),
+                ));
+            }
+            let bounded = values
+                .iter()
+                .filter(|value| **value <= 45 || **value == u32::MAX)
+                .count();
+            let role_matches = values
+                .iter()
+                .filter(|value| expected_roles.contains(value))
+                .count();
+            let non_zero = values.iter().filter(|value| **value != 0).count();
+            if bounded >= 12 && role_matches >= 3 && non_zero >= 5 {
+                runs += 1;
+            }
+        }
+        runs
     }
 }

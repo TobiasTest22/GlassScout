@@ -134,14 +134,20 @@ export type LiveTacticSlot = {
   position: string;
   role: string | null;
   duty: string | null;
+  decoderStatus?: string;
 };
 
 export type LiveTactic = {
   name: string | null;
   formation: string;
+  formationEnum?: string;
   slots: LiveTacticSlot[];
   teamInstructions: string[];
   playerInstructionsReadable: boolean;
+  decoderStatus?: string;
+  formationCode?: number;
+  layoutStatus?: "exact-template" | "formation-name-only";
+  warnings?: string[];
 };
 
 export type TacticSource = "none" | "live-memory";

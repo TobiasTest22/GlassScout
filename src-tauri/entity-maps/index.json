@@ -75,8 +75,9 @@
           "transferAvailability": { "offset": null, "source": "contract-or-transfer relation", "valueType": "flags", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] }
         },
         "tactic": {
-          "managerObject": { "offset": 74061456, "source": "module-vtable-rva", "valueType": "vtable", "transform": "unique private object scan", "status": "candidate", "confidence": 0.7, "validations": ["TACTICS_MANAGER RTTI matched", "unique object observed in active save"] },
-          "formation": { "offset": null, "source": "tactics-manager", "valueType": "slot-array", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] },
+          "managerObject": { "offset": 74061456, "source": "module-vtable-rva", "valueType": "vtable", "transform": "unique private object scan", "status": "validated", "confidence": 0.92, "validations": ["TACTICS_MANAGER RTTI matched", "unique object observed in active save", "selected XI block resolves managed-player person pointers"] },
+          "formation": { "offset": 980, "source": "tactics-manager", "valueType": "u32 enum", "transform": "FM26 metadata formation catalogue; code 4 -> Formation433DMWide -> 4-1-2-3 DM Wide", "status": "validated", "confidence": 0.9, "validations": ["offset 0x03D4 read code 4 while FM26 UI displayed 4-1-2-3 DM Wide", "global-metadata.dat formation enum names extracted for this build"] },
+          "selectedPlayers": { "offset": 17464, "source": "tactics-manager+selection-pointer", "valueType": "person-pointer[11]", "transform": "pointer at tactic+0x41B8, then selected person array at +0x1B00", "status": "validated", "confidence": 0.93, "validations": ["11 consecutive active tactic person pointers", "all resolved against managed squad player records", "zero terminator after slot 11"] },
           "roles": { "offset": null, "source": "tactics-manager", "valueType": "enum-array", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] },
           "duties": { "offset": null, "source": "tactics-manager", "valueType": "enum-array", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] },
           "teamInstructions": { "offset": null, "source": "tactics-manager", "valueType": "flags", "transform": null, "status": "unmapped", "confidence": 0.0, "validations": [] }

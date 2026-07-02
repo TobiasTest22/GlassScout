@@ -7,6 +7,7 @@ import { TacticalBoard } from "@/components/tactical-board";
 export function TacticsScreen({ snapshot }: { snapshot: LiveFootballSnapshot }) {
   const ready = snapshot.tacticSource === "live-memory" && snapshot.tactic != null;
   const objectDetected = snapshot.status.liveMemoryTacticRead === "object_detected_unmapped";
+  const tacticObjectDetected = ready || objectDetected;
 
   return (
     <main className="screen tactical-workspace">
@@ -25,19 +26,24 @@ export function TacticsScreen({ snapshot }: { snapshot: LiveFootballSnapshot }) 
             <header><Cpu /><h2>Live tactic source</h2></header>
             <dl>
               <div><dt>Source</dt><dd>{snapshot.tacticSource === "live-memory" ? "Active FM26 tactic" : "None"}</dd></div>
-              <div><dt>Tactic object</dt><dd>{objectDetected || ready ? "Detected" : "Not detected"}</dd></div>
+              <div><dt>Tactic object</dt><dd>{tacticObjectDetected ? "Detected" : "Not detected"}</dd></div>
               <div><dt>Formation</dt><dd>{snapshot.tactic?.formation ?? "Not validated"}</dd></div>
-              <div><dt>Roles and duties</dt><dd>{ready ? "Available" : "Not validated"}</dd></div>
-              <div><dt>Instructions</dt><dd>{snapshot.tactic?.teamInstructions.length ? "Available" : "Not validated"}</dd></div>
+              <div><dt>FM26 enum</dt><dd>{snapshot.tactic?.formationEnum ?? "Not available"}</dd></div>
+              <div><dt>Pitch layout</dt><dd>{snapshot.tactic?.layoutStatus === "exact-template" ? "Template mapped" : ready ? "Selected XI only" : "Not validated"}</dd></div>
+              <div><dt>Selected XI</dt><dd>{snapshot.tactic?.slots.length ? `${snapshot.tactic.slots.length} live slots` : "Not validated"}</dd></div>
+              <div><dt>Roles and duties</dt><dd>{ready ? "Decoder pending" : "Not validated"}</dd></div>
+              <div><dt>Instructions</dt><dd>{snapshot.tactic?.teamInstructions.length ? "Available" : ready ? "Decoder pending" : "Not validated"}</dd></div>
             </dl>
           </section>
           <section>
             <header>{ready ? <CheckCircle2 /> : <AlertTriangle />}<h2>Analysis readiness</h2></header>
             <p>
               {ready
-                ? "The active tactic has passed build-specific validation and can be used for tactical fit."
+                ? snapshot.tactic?.layoutStatus === "exact-template"
+                  ? "The active FM26 formation template and selected XI have passed memory validation. Role/duty fit remains disabled until the packed role codes validate."
+                  : "The active FM26 formation code and selected XI are live. Exact pitch placement for this formation still needs template validation, so no role/duty fit is invented."
                 : objectDetected
-                  ? "GlassScout found FM26’s live tactic manager, but the packed formation, in-possession and out-of-possession slot layout is not fully decoded for this build. No tactic or fit score is invented."
+                  ? "GlassScout found FM26’s live tactic manager, but the selected-slot block did not validate for this read. No tactic or fit score is invented."
                   : "The live tactic object was not available. Open FM26, load the save and select the active tactic."}
             </p>
           </section>

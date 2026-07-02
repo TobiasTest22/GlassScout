@@ -1,7 +1,7 @@
 #[cfg(target_os = "windows")]
 use super::memory::{ModuleInfo, ProcessReader};
 #[cfg(target_os = "windows")]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub(crate) struct PatternParseError;
@@ -96,11 +96,7 @@ pub(crate) fn scan_private_memory_for_pointers(
         ));
     }
 
-    let needles: Vec<(u64, [u8; 8])> = pointers
-        .iter()
-        .copied()
-        .map(|pointer| (pointer, pointer.to_le_bytes()))
-        .collect();
+    let needles: HashSet<u64> = pointers.iter().copied().collect();
     let mut hits: HashMap<u64, Vec<u64>> = pointers
         .iter()
         .copied()
@@ -118,12 +114,13 @@ pub(crate) fn scan_private_memory_for_pointers(
             let first_aligned = ((8 - (base as usize & 7)) & 7).min(bytes.len());
             let mut position = first_aligned;
             while position + 8 <= bytes.len() {
-                for (pointer, needle) in &needles {
-                    if bytes[position..position + 8] == *needle {
-                        hits.entry(*pointer)
-                            .or_default()
-                            .push(base + position as u64);
-                    }
+                let value = u64::from_le_bytes(
+                    bytes[position..position + 8]
+                        .try_into()
+                        .expect("eight-byte aligned memory candidate"),
+                );
+                if needles.contains(&value) {
+                    hits.entry(value).or_default().push(base + position as u64);
                 }
                 position += 8;
             }
