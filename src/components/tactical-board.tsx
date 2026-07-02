@@ -66,11 +66,12 @@ export function TacticalBoard({
           const player = playerById(snapshot.players, slot.playerId);
           const [left, top] = coordinatesForSlot(slot, index);
           const fit = player?.roleFit;
+          const roleLabel = slot.roleShort ?? slot.role ?? "Role not decoded";
           return (
             <button key={`${slot.position}-${index}`} className="pitch-player" style={{ left: `${left}%`, top: `${top}%` }} onClick={() => player && onOpenPlayer?.(player.id)} disabled={!player}>
               <span className="fit-ring" style={{ "--fit": `${fit ?? 0}%` } as CSSProperties} data-known={fit != null}>{fit ?? "—"}</span>
               <strong>{player?.name ?? "Unassigned"}</strong>
-              <small>{slot.position} · {slot.roleShort ?? slot.role ?? "Role pending"}{slot.dutyShort || slot.duty ? ` · ${slot.dutyShort ?? slot.duty}` : ""}</small>
+              <small>{slot.position} · {roleLabel}{slot.dutyShort || slot.duty ? ` · ${slot.dutyShort ?? slot.duty}` : ""}</small>
             </button>
           );
         })}

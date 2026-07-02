@@ -13,7 +13,7 @@ const loadStageLabels: Record<string, string> = {
   reading_managed_club: "Reading managed club…",
   loading_managed_squad: "Loading managed squad…",
   indexing_player_database: "Indexing wider player database…",
-  building_visibility_index: "Building visibility-safe index…",
+  building_visibility_index: "Building scouting-knowledge index…",
   ready: "Ready",
 };
 
@@ -67,7 +67,7 @@ export function StartupScreen({
         <h1>{desktopRuntime ? "Load your active FM26 save" : "Install GlassScout for Windows"}</h1>
         <p>
           {desktopRuntime
-            ? "Open FM26 and load your save, then start a read-only scan. GlassScout loads your club and squad first, then indexes the wider player database behind strict visibility gates."
+            ? "Open FM26 and load your save, then start a read-only scan. GlassScout loads your club and squad first, then indexes the wider player database with scouting-knowledge limits."
             : "GlassScout reads the active FM26 game through its installed Windows desktop connector."}
         </p>
         {desktopRuntime ? (

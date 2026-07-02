@@ -33,6 +33,19 @@ function evidenceValue(player: LivePlayer, attribute: string) {
   return typeof value === "number" ? String(value) : "Unknown";
 }
 
+function metricLabel(value: string) {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\bXg\b/i, "xG")
+    .replace(/\bXa\b/i, "xA")
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function metricValue(label: string, value: unknown) {
+  if (typeof value !== "number") return "Unknown";
+  return value.toFixed(label.toLowerCase().includes("per 90") ? 2 : 0);
+}
+
 function AttributeGroup({ title, names, player }: { title: string; names: string[]; player: LivePlayer }) {
   return (
     <section className="attribute-column">
@@ -114,12 +127,13 @@ export function PlayerProfileScreen({
     return (
       <main className="screen">
         <Button variant="outline" onClick={onBack}><ArrowLeft data-icon="inline-start" />Back</Button>
-        <section className="favorites-empty"><h1>Player unavailable</h1><p>This player is not present in the latest visibility-safe dataset.</p></section>
+        <section className="favorites-empty"><h1>Player unavailable</h1><p>This player is not present in the latest live or indexed FM26 data.</p></section>
       </main>
     );
   }
 
   const club = player.clubId ? snapshot.clubs.find((item) => item.id === player.clubId) : null;
+  const clubName = club?.name ?? player.clubName;
   const mappedAttributeCount = Object.values(player.attributes ?? {}).filter((value) => typeof value === "number").length;
   const knownEvidence = player.scoutConfidence ?? Math.min(100, Math.round((mappedAttributeCount / 47) * 100));
   const unknownEvidence = 100 - knownEvidence;
@@ -141,7 +155,7 @@ export function PlayerProfileScreen({
 
       <section className="player-facts">
         <span><b>Nationality</b><strong>{player.nationality ?? "Unknown"}</strong></span>
-        <button className="player-club-fact" disabled={!club} onClick={() => club && onOpenClub?.(club.id)}>{club ? <ClubLogo clubId={club.id} name={club.name} size="sm" /> : null}<span><b>Club</b><strong>{club?.name ?? "Unknown"}</strong></span></button>
+        <button className="player-club-fact" disabled={!club} onClick={() => club && onOpenClub?.(club.id)}>{club ? <ClubLogo clubId={club.id} name={club.name} size="sm" /> : null}<span><b>Club</b><strong>{clubName ?? "Unknown"}</strong></span></button>
         <span><b>Age / DOB</b><strong>{player.age ?? "Unknown"}{player.dateOfBirth ? ` · ${player.dateOfBirth}` : ""}</strong></span>
         <span><b>Position</b><strong>{player.positions.join(" / ") || "Unknown"}</strong></span>
         <span><b>Preferred foot</b><strong>{player.preferredFoot ?? "Unknown"}</strong></span>
@@ -166,7 +180,7 @@ export function PlayerProfileScreen({
               <section className="dossier-panel scout-summary-panel">
                 <header><UserRound /><h2>Scout summary</h2></header>
                 <p>
-                  Live memory confirms <strong>{player.name}</strong> ({player.nationality ?? "nationality unknown"}, age {player.age ?? "unknown"}) belongs to {club?.name ?? "the current club"}.
+                  GlassScout identifies <strong>{player.name}</strong> ({player.nationality ?? "nationality unknown"}, age {player.age ?? "unknown"}) at {clubName ?? "an unmapped club"}.
                 </p>
                 <div className="summary-columns">
                   <div><h3><CheckCircle2 />Strengths</h3><span>{player.strengths.length ? player.strengths.join(" · ") : "No visible evidence"}</span></div>
@@ -240,7 +254,7 @@ export function PlayerProfileScreen({
                 <div className="form-bars">{Array.from({ length: 10 }, (_, index) => <i key={index} />)}</div>
                 <span><small>Current form</small><strong>{player.averageRating?.toFixed(2) ?? "Unknown"}</strong></span>
                 <div className="career-stats">
-                  <span><small>Appearances</small><strong>Unknown</strong></span>
+                  <span><small>Minutes</small><strong>{player.minutesPlayed ?? "Unknown"}</strong></span>
                   <span><small>Goals</small><strong>{player.goals ?? "Unknown"}</strong></span>
                   <span><small>Assists</small><strong>{player.assists ?? "Unknown"}</strong></span>
                 </div>
@@ -260,7 +274,8 @@ export function PlayerProfileScreen({
             <header><MapPinned /><h2>In possession / out of possession evidence</h2></header>
             <div className="role-phase-grid">
               <article><small>Best mapped FM26 role</small><strong>{player.bestRole ?? "Role unknown"}</strong><p>{player.roleFit == null ? "Not enough mapped evidence." : `${player.roleFit}/100 from position familiarity and mapped attributes.`}</p></article>
-              <article><small>Out of possession</small><strong>{snapshot.tactic ? "Tactic packet validation required" : "Live tactic layout pending"}</strong><p>Out-of-possession slot roles are shown only when the FM26 tactic role packet validates.</p></article>
+              <article><small>In possession</small><strong>{player.inPossessionFit == null ? "Unknown" : `${player.inPossessionFit}/100`}</strong><p>Mapped from the local FM Dossier role-phase index when available.</p></article>
+              <article><small>Out of possession</small><strong>{player.outOfPossessionFit == null ? "Unknown" : `${player.outOfPossessionFit}/100`}</strong><p>Mapped separately from the out-of-possession role-phase index when available.</p></article>
               <article><small>Combined recommendation</small><strong>{player.recommendation?.minimum == null ? "Not enough evidence" : player.recommendation.minimum === player.recommendation.maximum ? player.recommendation.minimum : `${player.recommendation.minimum}–${player.recommendation.maximum}`}</strong><p>{(player.recommendation?.completeness ?? 0) >= 95 ? "Exact score from complete visible evidence." : "Partial observations produce an interval, never a false exact score."}</p></article>
             </div>
             <RoleFitCards player={player} />
@@ -283,14 +298,25 @@ export function PlayerProfileScreen({
             <header><BarChart3 /><h2>Performance and per 90</h2></header>
             <div className="performance-grid">
               {Object.entries({ "Average rating": player.averageRating, Minutes: player.minutesPlayed, Goals: player.goals, Assists: player.assists, ...player.per90 }).map(([label, value]) => (
-                <article key={label}><small>{label}</small><strong>{typeof value === "number" ? value.toFixed(label.includes("90") ? 2 : 0) : "Unknown"}</strong></article>
+                <article key={label}><small>{metricLabel(label)}</small><strong>{metricValue(metricLabel(label), value)}</strong></article>
               ))}
             </div>
             <p className="evidence-caption">Only competition and per-90 values read from club-visible FM26 structures appear here.</p>
           </section>
         </TabsContent>
         <TabsContent value="career">
-          <section className="dossier-panel dossier-locked-state"><ShieldAlert /><h2>Career history is not mapped for this build</h2><p>No placeholder seasons or appearances are shown.</p></section>
+          <section className="dossier-panel tab-evidence-panel">
+            <header><BarChart3 /><h2>Career history</h2><span>Mapped totals</span></header>
+            <div className="performance-grid">
+              {Object.entries(player.careerTotals ?? {}).map(([label, value]) => (
+                <article key={label}><small>{metricLabel(label)}</small><strong>{metricValue(metricLabel(label), value)}</strong></article>
+              ))}
+              <article><small>Signed</small><strong>{player.signDate ?? "Unknown"}</strong></article>
+              <article><small>Contract start</small><strong>{player.contractStartDate ?? "Unknown"}</strong></article>
+              <article><small>Remaining</small><strong>{player.contractRemaining ?? "Unknown"}</strong></article>
+            </div>
+            <p className="evidence-caption">Season-by-season timeline is shown only when that structure is mapped; these totals come from the local FM26 save index.</p>
+          </section>
         </TabsContent>
       </Tabs>
     </main>

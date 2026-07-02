@@ -27,6 +27,7 @@ use crate::{
         tactics::tactic_formation_template,
         validator,
     },
+    fm_dossier,
 };
 
 #[derive(Clone, Serialize)]
@@ -163,6 +164,10 @@ pub fn load_active_save(app: tauri::AppHandle) -> ConnectorSnapshot {
 
 #[tauri::command]
 pub fn search_indexed_players(query: String) -> Vec<Value> {
+    let dossier_results = fm_dossier::search_players(&query, 500);
+    if !dossier_results.is_empty() {
+        return dossier_results;
+    }
     let normalized = query.trim().to_lowercase();
     let Some(index) = PLAYER_DATABASE_INDEX.get() else {
         return Vec::new();
@@ -196,6 +201,10 @@ pub fn search_indexed_players(query: String) -> Vec<Value> {
 
 #[tauri::command]
 pub fn indexed_players_by_ids(player_ids: Vec<String>) -> Vec<Value> {
+    let dossier_results = fm_dossier::players_by_ids(&player_ids);
+    if !dossier_results.is_empty() {
+        return dossier_results;
+    }
     let Some(index) = PLAYER_DATABASE_INDEX.get() else {
         return Vec::new();
     };
@@ -207,6 +216,11 @@ pub fn indexed_players_by_ids(player_ids: Vec<String>) -> Vec<Value> {
         .filter_map(|id| index.records.get(id))
         .map(indexed_player_json)
         .collect()
+}
+
+#[tauri::command]
+pub fn indexed_player_profile(player_id: String) -> Option<Value> {
+    fm_dossier::player_profile(&player_id)
 }
 
 fn indexed_player_json(record: &IndexedPlayerRecord) -> Value {
@@ -1069,13 +1083,37 @@ fn extract_live_data(
             object.remove("_season");
         }
     }
+    let dossier_reference = fm_dossier::augment_live_players(&mut players);
+    let database_players_indexed = dossier_reference
+        .as_ref()
+        .map(|reference| database_players_indexed.max(reference.player_count))
+        .unwrap_or(database_players_indexed);
+    let background_players_indexed = dossier_reference
+        .as_ref()
+        .map(|reference| {
+            reference
+                .player_count
+                .saturating_sub(players.len().try_into().unwrap_or_default())
+                .max(background_players_indexed)
+        })
+        .unwrap_or(background_players_indexed);
+    let database_index_status = if dossier_reference.is_some() {
+        "ready"
+    } else {
+        database_index_status
+    };
+    let database_scope = if dossier_reference.is_some() {
+        "full-save-index"
+    } else {
+        database_scope
+    };
     let tactic = tactic_manager_pointer
         .and_then(|pointer| extract_live_tactic(reader, pointer, &managed_tactic_records));
     let mut warnings = vec![
         "Managed-squad IDs, names, dates of birth, ages, nationality, positions, preferred foot and visible attributes are validated for this FM26 build. Hidden CA/PA is never read or scored.".to_string(),
         "FM26 role, duty and out-of-possession role catalogues are mapped from the current build metadata. Player playable-role scoring now uses mapped role metadata plus live attributes and position familiarity.".to_string(),
         "Form, match ratings, contract, wage, valuation, fitness and squad-status relationships are not yet validated for this build and remain Unknown.".to_string(),
-        "Own-squad players are fully known. Wider-save records remain hidden until FM26 scout-report visibility, ranges and confidence are validated.".to_string(),
+        "Own-squad players are fully known. Wider-save records are indexed; exact unknown data stays unavailable unless FM scout reports expose it.".to_string(),
         if tactic.is_some() {
             "Live FM26 tactic formation and selected XI slots are mapped from the active tactic manager. Role/duty slot packets are published only if their FM26 masks validate against the live formation.".to_string()
         } else {
@@ -1084,14 +1122,26 @@ fn extract_live_data(
         "The FM26 shortlist collection is not mapped safely. GlassScout Favorites remains a local list resolved against live players.".to_string(),
     ];
     if include_database_index && database_index_status == "ready" {
-        warnings.push(format!(
-            "{background_players_indexed} wider-save player records were indexed in memory. They remain hidden from the UI until FM scout-knowledge visibility can be validated."
-        ));
+        if dossier_reference.is_some() {
+            warnings.push(format!(
+                "{background_players_indexed} wider-save player records are available through the FM Dossier local save index. Scout-knowledge gates still decide what profile detail is shown."
+            ));
+        } else {
+            warnings.push(format!(
+                "{background_players_indexed} wider-save player records were indexed in memory. They remain hidden from the UI until FM scout-knowledge visibility can be validated."
+            ));
+        }
     } else if include_database_index {
         warnings.push(
             "The wider player database could not be indexed safely; only the managed squad is available."
                 .to_string(),
         );
+    }
+    if let Some(reference) = &dossier_reference {
+        warnings.push(format!(
+            "FM Dossier local save index enriched missing contract, wage, value, condition, history and search fields from {}. This is a local read-only reference layer while native offsets are mapped.",
+            reference.path.display()
+        ));
     }
     let clubs = vec![json!({
         "id": club_id,

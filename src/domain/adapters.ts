@@ -82,12 +82,21 @@ export type LivePlayer = {
   strengths: string[];
   weaknesses: string[];
   clubId: string | null;
+  clubName?: string | null;
   transferInterest: string | null;
   loanInterest: string | null;
   transferAvailable: boolean | null;
   loanAvailable: boolean | null;
   attributes?: Record<string, number | null>;
   per90?: Record<string, number | null>;
+  inPossessionFit?: number | null;
+  outOfPossessionFit?: number | null;
+  projectedInPossessionFit?: number | null;
+  projectedOutOfPossessionFit?: number | null;
+  matchSharpness?: number | null;
+  fatigue?: number | null;
+  efficiencyScore?: number | null;
+  dossierReference?: string | null;
   scoutKnowledge?: "fully_known" | "partly_known" | "unknown" | "needs_scouting" | "missing_data";
   scoutConfidence?: number | null;
   lastScoutedDate?: string | null;
@@ -103,6 +112,14 @@ export type LivePlayer = {
   marketValueAmount?: number | null;
   personality?: string | null;
   condition?: string | null;
+  heightCm?: number | null;
+  rawStats?: Record<string, number | null>;
+  careerTotals?: Record<string, number | null>;
+  formHistory?: string | null;
+  traits?: string | null;
+  contractStartDate?: string | null;
+  signDate?: string | null;
+  contractRemaining?: string | null;
   recommendation?: RecommendationEvidence;
   knowledge?: Record<string, KnowledgeField<unknown>>;
 };
@@ -309,11 +326,24 @@ export const fm26LiveAdapter: FootballDataAdapter = {
 export type IndexedPlayerSearchResult = {
   id: string;
   name: string;
+  age?: number | null;
+  nationality?: string | null;
+  clubId?: string | null;
+  clubName?: string | null;
   positions: string[];
   managedSquad: boolean;
   visibility: "known" | "unknown";
-  scoutKnowledge: "fully_known" | "unknown";
+  scoutKnowledge: "fully_known" | "partly_known" | "unknown";
   scoutConfidence: number;
+  bestRole?: string | null;
+  roleFit?: number | null;
+  value?: string | null;
+  wage?: string | null;
+  contractStatus?: string | null;
+  averageRating?: number | null;
+  minutesPlayed?: number | null;
+  goals?: number | null;
+  assists?: number | null;
 };
 
 export async function searchIndexedPlayers(query: string): Promise<IndexedPlayerSearchResult[]> {
@@ -326,6 +356,12 @@ export async function indexedPlayersByIds(playerIds: string[]): Promise<IndexedP
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window) || playerIds.length === 0) return [];
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<IndexedPlayerSearchResult[]>("indexed_players_by_ids", { playerIds });
+}
+
+export async function indexedPlayerProfile(playerId: string): Promise<LivePlayer | null> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<LivePlayer | null>("indexed_player_profile", { playerId });
 }
 
 export type MappingLabStatus = {

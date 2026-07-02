@@ -14,15 +14,15 @@ import { Input } from "@/components/ui/input";
 type SortKey = "name" | "role" | "knowledge" | "interest" | "recommendation";
 type SortDirection = "asc" | "desc";
 
-const interestedLabels = new Set(["Very interested", "Interested", "Slightly interested", "Only loan possible"]);
+const interestedLabels = new Set(["Very interested", "Interested", "Slightly interested", "Only loan possible", "Transfer listed", "Loan listed"]);
 
 function indexedPlayer(result: IndexedPlayerSearchResult): LivePlayer {
   return {
-    id: result.id, name: result.name, age: null, nationality: null, positions: result.positions,
-    bestRole: null, currentAbility: null, potentialAbility: null, form: null, averageRating: null,
-    minutesPlayed: null, goals: null, assists: null, contractStatus: null, value: null, wage: null,
-    squadImportance: null, developmentTrend: null, tacticalFit: null, roleFit: null, strengths: [],
-    weaknesses: [], clubId: null, transferInterest: null, loanInterest: null, transferAvailable: null,
+    id: result.id, name: result.name, age: result.age ?? null, nationality: result.nationality ?? null, positions: result.positions,
+    bestRole: result.bestRole ?? null, currentAbility: null, potentialAbility: null, form: result.averageRating == null ? null : result.averageRating.toFixed(2), averageRating: result.averageRating ?? null,
+    minutesPlayed: result.minutesPlayed ?? null, goals: result.goals ?? null, assists: result.assists ?? null, contractStatus: result.contractStatus ?? null, value: result.value ?? null, wage: result.wage ?? null,
+    squadImportance: null, developmentTrend: null, tacticalFit: null, roleFit: result.roleFit ?? null, strengths: [],
+    weaknesses: [], clubId: result.clubId ?? null, clubName: result.clubName ?? null, transferInterest: null, loanInterest: null, transferAvailable: null,
     loanAvailable: null, attributes: {}, scoutKnowledge: result.scoutKnowledge,
     scoutConfidence: result.scoutConfidence, preferredFoot: null,
   };
@@ -66,7 +66,7 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
   onOpenPlayer: (playerId: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [interestedOnly, setInterestedOnly] = useState(true);
+  const [interestedOnly, setInterestedOnly] = useState(false);
   const [position, setPosition] = useState("All");
   const [knowledge, setKnowledge] = useState("All");
   const [indexed, setIndexed] = useState<IndexedPlayerSearchResult[]>([]);
@@ -95,7 +95,8 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
     const normalized = query.trim().toLowerCase();
     const result = allPlayers.filter((player) => {
       const club = player.clubId ? clubById.get(player.clubId) : null;
-      const matchesQuery = !normalized || [player.name, club?.name, player.nationality, ...player.positions].filter(Boolean).some((item) => item?.toLowerCase().includes(normalized));
+      const clubName = club?.name ?? player.clubName;
+      const matchesQuery = !normalized || [player.name, clubName, player.nationality, ...player.positions].filter(Boolean).some((item) => item?.toLowerCase().includes(normalized));
       return matchesQuery
         && (!interestedOnly || interestedLabels.has(interestLabel(player)))
         && (position === "All" || player.positions.includes(position))
@@ -151,9 +152,10 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
           const favorite = favoriteIds.has(player.id);
           const rec = recommendation(player);
           const hasLiveDossier = liveById.has(player.id);
+          const clubName = club?.name ?? player.clubName;
           return (
-            <article key={player.id} className={hasLiveDossier ? "" : "indexed-player-row"} onClick={() => hasLiveDossier && onOpenPlayer(player.id)}>
-              <div className="target-identity"><PlayerFace playerId={player.id} name={player.name} size="sm" highResolution /><div><strong>{player.name}</strong><small>{player.age ?? "Age unknown"} · {player.nationality ?? "Nation unknown"} · {player.positions.join(" / ") || "Position unknown"} · FM ID {player.id}</small><b className="target-club">{club ? <ClubLogo clubId={club.id} name={club.name} size="sm" /> : null}{club?.name ?? "Club not mapped"}</b></div></div>
+            <article key={player.id} className={hasLiveDossier ? "" : "indexed-player-row"} onClick={() => onOpenPlayer(player.id)}>
+              <div className="target-identity"><PlayerFace playerId={player.id} name={player.name} size="sm" highResolution /><div><strong>{player.name}</strong><small>{player.age ?? "Age unknown"} · {player.nationality ?? "Nation unknown"} · {player.positions.join(" / ") || "Position unknown"} · FM ID {player.id}</small><b className="target-club">{club ? <ClubLogo clubId={club.id} name={club.name} size="sm" /> : null}{clubName ?? "Club not mapped"}</b></div></div>
               <div className="scout-fit-cell"><RatingRing value={player.roleFit} /><span><strong>{player.bestRole ?? "Not evaluated"}</strong><small>{player.tacticalFit == null ? "Live tactic required" : `${player.tacticalFit}% tactic fit`}</small></span></div>
               <div><strong>{knowledgeLabel(player)}</strong><small>{player.scoutConfidence == null ? "Confidence unknown" : `${player.scoutConfidence}% confidence`}</small></div>
               <div><strong>{interestLabel(player)}</strong><small>{interestLabel(player) === "Unknown" ? "Not mapped for this build" : "From FM26"}</small></div>

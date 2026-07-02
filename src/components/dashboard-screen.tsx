@@ -99,7 +99,7 @@ export function DashboardScreen({
     },
     {
       icon: ShieldCheck,
-      title: `${squad.length} managed-club players visibility-safe`,
+      title: `${squad.length} managed-club players mapped`,
       detail: "IDs, ages, nations, positions, feet and visible attributes are live; unsupported fields remain Unknown.",
       action: "Open squad",
       screen: "Squad" as Screen,
@@ -116,10 +116,10 @@ export function DashboardScreen({
           <div className="recruitment-pulse-empty">
             <span className="target-avatar"><SearchCheck /></span>
             <div>
-              <strong>No visibility-safe external targets yet</strong>
+              <strong>Search the indexed player database</strong>
               <p>
                 {snapshot.status.backgroundPlayersIndexed
-                  ? `${snapshot.status.backgroundPlayersIndexed} wider-save records are indexed but hidden until club knowledge is mapped.`
+                  ? `${snapshot.status.backgroundPlayersIndexed} wider-save records are searchable. Unknown details stay unknown until scout knowledge exists.`
                   : "Load the active save to build the wider player index."}
               </p>
             </div>

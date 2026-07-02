@@ -4,6 +4,7 @@ mod commands;
 mod connector;
 mod data;
 mod fm26;
+mod fm_dossier;
 mod graphics;
 mod mapping_lab;
 mod player_face;
@@ -33,6 +34,7 @@ pub fn run() {
             connector::load_active_save,
             connector::search_indexed_players,
             connector::indexed_players_by_ids,
+            connector::indexed_player_profile,
             mapping_lab::mapping_lab_status,
             mapping_lab::mapping_lab_capture,
             mapping_lab::mapping_lab_compare,

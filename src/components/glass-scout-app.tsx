@@ -16,10 +16,12 @@ import { ClubProfileScreen } from "@/components/club-profile-screen";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   fm26LiveAdapter,
+  indexedPlayerProfile,
   searchIndexedPlayers,
   type IndexedPlayerSearchResult,
   type LiveConnectorStatus,
   type LiveFootballSnapshot,
+  type LivePlayer,
 } from "@/domain/adapters";
 import { toggleFavorite, updateFavoriteNote, type FavoriteRecord } from "@/domain/live-data";
 
@@ -81,6 +83,31 @@ const initialSnapshot: LiveFootballSnapshot = {
   dataWarnings: [],
 };
 
+function meaningfulEntries(player: LivePlayer) {
+  return Object.fromEntries(
+    Object.entries(player).filter(([, value]) => {
+      if (value == null) return false;
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === "object") return Object.keys(value).length > 0;
+      return true;
+    }),
+  ) as Partial<LivePlayer>;
+}
+
+function mergeIndexedProfile(existing: LivePlayer | undefined, profile: LivePlayer): LivePlayer {
+  if (!existing) return profile;
+  return {
+    ...existing,
+    ...meaningfulEntries(profile),
+    attributes: Object.keys(profile.attributes ?? {}).length ? profile.attributes : existing.attributes,
+    per90: Object.keys(profile.per90 ?? {}).length ? profile.per90 : existing.per90,
+    strengths: profile.strengths?.length ? profile.strengths : existing.strengths,
+    weaknesses: profile.weaknesses?.length ? profile.weaknesses : existing.weaknesses,
+    playableRoles: profile.playableRoles?.length ? profile.playableRoles : existing.playableRoles,
+    otherRoles: profile.otherRoles?.length ? profile.otherRoles : existing.otherRoles,
+  };
+}
+
 export function GlassScoutApp() {
   const [mode, setMode] = useState<"fm26" | null>(null);
   const [screen, setScreen] = useState<Screen>("Dashboard");
@@ -130,10 +157,26 @@ export function GlassScoutApp() {
 
   const togglePlayerFavorite = (playerId: string) => setFavorites((current) => toggleFavorite(current, playerId));
   const updatePlayerNote = (playerId: string, note: string) => setFavorites((current) => updateFavoriteNote(current, playerId, note));
-  const openPlayer = (playerId: string) => {
+  const loadIndexedPlayerProfile = useCallback(async (playerId: string) => {
+    try {
+      const profile = await indexedPlayerProfile(playerId);
+      if (!profile) return;
+      setSnapshot((current) => {
+        const existingIndex = current.players.findIndex((player) => player.id === profile.id);
+        if (existingIndex === -1) return { ...current, players: [...current.players, profile] };
+        const players = [...current.players];
+        players[existingIndex] = mergeIndexedProfile(players[existingIndex], profile);
+        return { ...current, players };
+      });
+    } catch {
+      // The profile screen will keep its clean unavailable state if the local save index cannot resolve this player.
+    }
+  }, []);
+  const openPlayer = useCallback((playerId: string) => {
     setSelectedPlayerId(playerId);
     setScreen("Player Profile");
-  };
+    void loadIndexedPlayerProfile(playerId);
+  }, [loadIndexedPlayerProfile]);
   const openClub = (clubId: string) => {
     setSelectedClubId(clubId);
     setScreen("Club Profile");
@@ -153,7 +196,7 @@ export function GlassScoutApp() {
     screen === "Squad" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onOpenPlayer={openPlayer} /> :
     screen === "Tactical Board" ? <TacticsScreen snapshot={snapshot} /> :
     screen === "Scout Room" ? <ScoutRoomScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
-    screen === "Shortlist" ? <FavoritedPlayersScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onUpdateNote={updatePlayerNote} /> :
+    screen === "Shortlist" ? <FavoritedPlayersScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onUpdateNote={updatePlayerNote} onOpenPlayer={openPlayer} /> :
     screen === "Player Profile" ? (
       <PlayerProfileScreen
         player={snapshot.players.find((player) => player.id === selectedPlayerId) ?? null}
@@ -183,7 +226,7 @@ export function GlassScoutApp() {
             <motion.div className="global-search-results" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
               <header><strong>Search results</strong><button onClick={() => setSearch("")}>Clear</button></header>
               {globalClubs.map((club) => <button key={club.id} onClick={() => { openClub(club.id); setSearch(""); }}><span>Team</span><strong>{club.name}</strong><small>{club.league ?? "Competition unknown"}</small></button>)}
-              {globalIndexed.map((result) => <button key={result.id} onClick={() => { if (snapshot.players.some((player) => player.id === result.id)) openPlayer(result.id); else setScreen("Scout Room"); setSearch(""); }}><span>Player</span><strong>{result.name}</strong><small>{result.positions.join(" / ") || "Position unknown"} · {result.visibility}</small></button>)}
+              {globalIndexed.map((result) => <button key={result.id} onClick={() => { openPlayer(result.id); setSearch(""); }}><span>Player</span><strong>{result.name}</strong><small>{result.positions.join(" / ") || "Position unknown"} · {result.visibility}</small></button>)}
               {!globalClubs.length && !globalIndexed.length ? <p>No indexed player or mapped team matches “{search}”.</p> : null}
             </motion.div>
           ) : null}

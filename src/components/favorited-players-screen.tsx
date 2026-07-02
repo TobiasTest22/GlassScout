@@ -14,11 +14,11 @@ type FavoriteSort = "name" | "age" | "roleFit" | "tacticalFit";
 
 function indexedFavorite(result: IndexedPlayerSearchResult): LivePlayer {
   return {
-    id: result.id, name: result.name, age: null, nationality: null, positions: result.positions,
-    bestRole: null, currentAbility: null, potentialAbility: null, form: null, averageRating: null,
-    minutesPlayed: null, goals: null, assists: null, contractStatus: null, value: null, wage: null,
-    squadImportance: null, developmentTrend: null, tacticalFit: null, roleFit: null, strengths: [],
-    weaknesses: [], clubId: null, transferInterest: null, loanInterest: null, transferAvailable: null,
+    id: result.id, name: result.name, age: result.age ?? null, nationality: result.nationality ?? null, positions: result.positions,
+    bestRole: result.bestRole ?? null, currentAbility: null, potentialAbility: null, form: result.averageRating == null ? null : result.averageRating.toFixed(2), averageRating: result.averageRating ?? null,
+    minutesPlayed: result.minutesPlayed ?? null, goals: result.goals ?? null, assists: result.assists ?? null, contractStatus: result.contractStatus ?? null, value: result.value ?? null, wage: result.wage ?? null,
+    squadImportance: null, developmentTrend: null, tacticalFit: null, roleFit: result.roleFit ?? null, strengths: [],
+    weaknesses: [], clubId: result.clubId ?? null, clubName: result.clubName ?? null, transferInterest: null, loanInterest: null, transferAvailable: null,
     loanAvailable: null, attributes: {}, scoutKnowledge: result.scoutKnowledge,
     scoutConfidence: result.scoutConfidence, preferredFoot: null,
   };
@@ -31,6 +31,7 @@ export function FavoritedPlayersScreen({
   onRefresh,
   onToggleFavorite,
   onUpdateNote,
+  onOpenPlayer,
 }: {
   snapshot: LiveFootballSnapshot;
   favorites: FavoriteRecord[];
@@ -38,6 +39,7 @@ export function FavoritedPlayersScreen({
   onRefresh: () => Promise<unknown>;
   onToggleFavorite: (playerId: string) => void;
   onUpdateNote: (playerId: string, note: string) => void;
+  onOpenPlayer: (playerId: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<FavoriteSort>("name");
@@ -92,14 +94,14 @@ export function FavoritedPlayersScreen({
         <section className="favorites-table">
           <header><span>Compare</span><span>Player</span><span>Knowledge</span><span>Role & fit</span><span>Form & market</span><span>Shortlist note</span><span>Remove</span></header>
           {visible.map(({ player, note }) => (
-            <article key={player.id}>
-              <input type="checkbox" aria-label={`Compare ${player.name}`} checked={compareIds.includes(player.id)} onChange={() => toggleCompare(player.id)} />
+            <article key={player.id} onClick={() => onOpenPlayer(player.id)}>
+              <input type="checkbox" aria-label={`Compare ${player.name}`} checked={compareIds.includes(player.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggleCompare(player.id)} />
               <div className="favorite-player"><PlayerFace playerId={player.id} name={player.name} size="sm" highResolution /><span><strong>{player.name}</strong><small>{player.age ?? "Age unknown"} · {player.nationality ?? "Nation unknown"} · {player.positions.join(" / ") || "Position unknown"}</small></span></div>
               <div className="favorite-knowledge">{player.scoutConfidence == null ? <span className="unknown-confidence-ring"><strong>—</strong></span> : <ConfidenceRing value={player.scoutConfidence} />}<span><strong>{(player.scoutKnowledge ?? "unknown").replaceAll("_", " ")}</strong><small>{player.scoutConfidence == null ? "Confidence unknown" : `${player.scoutConfidence}% confidence`}</small></span></div>
               <div><strong>{player.bestRole ?? "Role not evaluated"}</strong><small>{player.roleFit == null ? "Fit unknown" : `${player.roleFit}% role fit`}</small></div>
               <div><strong>{player.form ?? "Form unknown"}</strong><small>{player.value ?? "Value unknown"} · {player.wage ?? "Wage unknown"} · {player.contractStatus ?? "Contract unknown"}</small></div>
               <Input aria-label={`Note for ${player.name}`} value={note} placeholder="Reason for shortlisting…" onChange={(event) => onUpdateNote(player.id, event.target.value)} />
-              <Button variant="ghost" size="icon-sm" aria-label={`Remove ${player.name} from shortlist`} onClick={() => onToggleFavorite(player.id)}><Trash2 /></Button>
+              <Button variant="ghost" size="icon-sm" aria-label={`Remove ${player.name} from shortlist`} onClick={(event) => { event.stopPropagation(); onToggleFavorite(player.id); }}><Trash2 /></Button>
             </article>
           ))}
         </section>
