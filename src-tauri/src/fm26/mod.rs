@@ -1,0 +1,8 @@
+pub(crate) mod memory;
+pub(crate) mod offsets;
+pub(crate) mod parser;
+pub(crate) mod permissions;
+pub(crate) mod process;
+pub(crate) mod scanner;
+pub(crate) mod structs;
+pub(crate) mod validator;

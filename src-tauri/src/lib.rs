@@ -1,6 +1,10 @@
 #![recursion_limit = "256"]
 
+mod commands;
 mod connector;
+mod data;
+mod fm26;
+mod graphics;
 mod mapping_lab;
 mod player_face;
 mod visibility;
@@ -9,6 +13,7 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _registered_commands = commands::registered_commands();
     let migrations = vec![Migration {
         version: 1,
         description: "initial_revealed_data_schema",

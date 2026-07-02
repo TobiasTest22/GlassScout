@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -10,68 +10,19 @@ use std::{
 };
 use tauri::Emitter;
 
-const READ_ONLY_PROCESS_ACCESS: u32 = 0x1410;
-const MAX_STRING_BYTES: usize = 192;
-const POSITION_NAMES: [&str; 15] = [
-    "GK", "SW", "DL", "DC", "DR", "DM", "ML", "MC", "MR", "AML", "AMC", "AMR", "ST", "WBL", "WBR",
-];
-const PLAYER_ATTRIBUTE_NAMES: [&str; 54] = [
-    "Crossing",
-    "Dribbling",
-    "Finishing",
-    "Heading",
-    "Long Shots",
-    "Marking",
-    "Off the Ball",
-    "Passing",
-    "Penalty Taking",
-    "Tackling",
-    "Vision",
-    "Handling",
-    "Aerial Reach",
-    "Command of Area",
-    "Communication",
-    "Kicking",
-    "Throwing",
-    "Anticipation",
-    "Decisions",
-    "One on Ones",
-    "Positioning",
-    "Reflexes",
-    "First Touch",
-    "Technique",
-    "Left Foot",
-    "Right Foot",
-    "Flair",
-    "Corners",
-    "Teamwork",
-    "Work Rate",
-    "Long Throws",
-    "Eccentricity",
-    "Rushing Out",
-    "Punching",
-    "Acceleration",
-    "Free Kick Taking",
-    "Strength",
-    "Stamina",
-    "Pace",
-    "Jumping Reach",
-    "Leadership",
-    "Dirtiness",
-    "Balance",
-    "Bravery",
-    "Consistency",
-    "Aggression",
-    "Agility",
-    "Important Matches",
-    "Injury Proneness",
-    "Versatility",
-    "Natural Fitness",
-    "Determination",
-    "Composure",
-    "Concentration",
-];
-const HIDDEN_ATTRIBUTE_INDEXES: [usize; 5] = [41, 44, 47, 48, 49];
+use crate::{
+    data::players::{IndexedPlayerRecord, PlayerDatabaseIndex},
+    fm26::{
+        memory::{ModuleInfo, ProcessReader},
+        offsets::{find_entity_map, mapping_coverage, EntityMapProfile, MappingCoverage},
+        parser::{default_role_for_position, preferred_foot_label, visible_attribute_map},
+        permissions::{can_write_memory, READ_ONLY_PROCESS_ACCESS_LABEL},
+        process::find_fm26_process,
+        scanner::{parse_pattern, scan_module, scan_private_memory_for_pointers},
+        structs::{FmDate, PLAYER_ATTRIBUTE_NAMES, POSITION_NAMES},
+        validator,
+    },
+};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,15 +72,6 @@ pub struct ConnectorStatus {
     warnings: Vec<String>,
 }
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MappingCoverage {
-    section: String,
-    validated: u32,
-    candidate: u32,
-    unmapped: u32,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorSnapshot {
@@ -154,91 +96,6 @@ struct ExecutableIdentity {
     architecture: Option<String>,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EntityMapIndex {
-    schema_version: u32,
-    profiles: Vec<EntityMapProfile>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EntityMapProfile {
-    id: String,
-    build_fingerprint: BuildFingerprint,
-    file_version: String,
-    product_version: String,
-    executable_sha256: String,
-    architecture: String,
-    module: String,
-    signatures: Vec<EntitySignature>,
-    pointer_chains: Vec<PointerChain>,
-    constants: MapConstants,
-    sections: HashMap<String, HashMap<String, FieldDefinition>>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BuildFingerprint {
-    executable_sha256: String,
-    file_version: String,
-    product_version: String,
-    architecture: String,
-    module: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldDefinition {
-    offset: Option<u64>,
-    source: String,
-    value_type: String,
-    transform: Option<String>,
-    status: String,
-    confidence: f64,
-    validations: Vec<String>,
-}
-
-#[derive(Deserialize)]
-struct EntitySignature {
-    name: String,
-    pattern: String,
-}
-
-#[derive(Deserialize)]
-struct PointerChain {
-    name: String,
-    root: String,
-    offsets: Vec<u64>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MapConstants {
-    manager_registry_vector_offset: u64,
-    human_person_offset: u64,
-    person_first_name_offset: u64,
-    person_second_name_offset: u64,
-    person_common_name_offset: u64,
-    person_contract_offset: u64,
-    contract_team_offset: u64,
-    team_vtable_rva: u64,
-    team_club_offset: u64,
-    team_players_start_offset: u64,
-    team_players_end_offset: u64,
-    club_vtable_rva: u64,
-    club_name_offset: u64,
-    entity_uid_offset: u64,
-    player_person_offset: u64,
-    player_positions_offset: u64,
-    player_attributes_offset: u64,
-    player_current_date_offset: u64,
-    person_nationality_offset: u64,
-    nation_name_offset: u64,
-    person_birth_date_offset: u64,
-    tactics_manager_vtable_rva: u64,
-}
-
 #[derive(Default)]
 struct ExtractionDiagnostics {
     entity_root: Option<u64>,
@@ -260,31 +117,6 @@ struct LiveData {
     database_scope: &'static str,
     warnings: Vec<String>,
     tactic_manager_pointer: Option<u64>,
-}
-
-#[derive(Clone)]
-struct IndexedPlayerRecord {
-    id: String,
-    name: String,
-    positions: Vec<String>,
-    managed_squad: bool,
-    visibility_safe: bool,
-    raw_player_address: u64,
-    person_address: u64,
-    contract_address: Option<u64>,
-}
-
-#[derive(Clone, Copy)]
-struct FmDate {
-    year: u16,
-    day_of_year: u16,
-}
-
-#[derive(Default)]
-struct PlayerDatabaseIndex {
-    process_id: u32,
-    save_pointer: u64,
-    records: HashMap<String, IndexedPlayerRecord>,
 }
 
 static PLAYER_DATABASE_INDEX: OnceLock<RwLock<PlayerDatabaseIndex>> = OnceLock::new();
@@ -439,8 +271,13 @@ pub(crate) fn capture_mapping_lab_player(
         .process_path()
         .ok_or_else(|| "The FM26 executable path could not be read.".to_string())?;
     let identity = read_executable_identity(&process_path);
-    let profile = find_entity_map(&identity)
-        .ok_or_else(|| "The running FM26 build does not match an exact entity map.".to_string())?;
+    let profile = find_entity_map(
+        identity.file_version.as_deref(),
+        identity.product_version.as_deref(),
+        identity.sha256.as_deref(),
+        identity.architecture.as_deref(),
+    )
+    .ok_or_else(|| "The running FM26 build does not match an exact entity map.".to_string())?;
     let mut targets = vec![
         ("player", record.raw_player_address),
         ("person", record.person_address),
@@ -500,7 +337,7 @@ fn empty_status() -> ConnectorStatus {
         last_sync: None,
         bytes_read: 0,
         executable_header_valid: false,
-        can_write_memory: false,
+        can_write_memory: can_write_memory(),
         game_build: None,
         product_version: None,
         executable_sha256: None,
@@ -511,7 +348,7 @@ fn empty_status() -> ConnectorStatus {
         mapping_schema_version: 2,
         mapping_coverage: Vec::new(),
         pointer_validation: "not_run",
-        handle_access_flags: "PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ (0x1410)",
+        handle_access_flags: READ_ONLY_PROCESS_ACCESS_LABEL,
         entity_root: None,
         save_pointer: None,
         managed_club_pointer: None,
@@ -588,7 +425,12 @@ fn collect_snapshot(
     status.executable_sha256 = identity.sha256.clone();
     status.architecture = identity.architecture.clone();
 
-    let Some(profile) = find_entity_map(&identity) else {
+    let Some(profile) = find_entity_map(
+        identity.file_version.as_deref(),
+        identity.product_version.as_deref(),
+        identity.sha256.as_deref(),
+        identity.architecture.as_deref(),
+    ) else {
         status.state = "parser_unverified";
         status.entity_map_status = "missing";
         status.failure_stage = Some("exact_build_match".to_string());
@@ -740,8 +582,11 @@ fn extract_live_data(
         .ok_or_else(|| {
             ExtractionFailure::new("manager_signature", "The exact build map is incomplete.")
         })?;
-    let pattern = parse_pattern(&signature.pattern)?;
-    let hits = reader.scan_module(module, &pattern)?;
+    let pattern = parse_pattern(&signature.pattern).map_err(|_| {
+        ExtractionFailure::new("entity_map", "The embedded signature pattern is invalid.")
+    })?;
+    let hits = scan_module(reader, module, &pattern)
+        .map_err(|error| ExtractionFailure::new("manager_signature", error.to_string()))?;
     if hits.len() != 1 {
         return Err(ExtractionFailure::new(
             "manager_signature",
@@ -834,12 +679,12 @@ fn extract_live_data(
                 "The managed FM26 team could not be resolved.",
             )
         })?;
-    validate_vtable(
+    validator::validate_vtable(
         reader,
         team,
         module.base + profile.constants.team_vtable_rva,
-        "managed_team",
-    )?;
+    )
+    .map_err(|message| ExtractionFailure::new("managed_team", message))?;
     let club = reader
         .read_pointer(team + profile.constants.team_club_offset)
         .filter(|value| *value != 0)
@@ -849,12 +694,12 @@ fn extract_live_data(
                 "The managed FM26 club could not be resolved.",
             )
         })?;
-    validate_vtable(
+    validator::validate_vtable(
         reader,
         club,
         module.base + profile.constants.club_vtable_rva,
-        "managed_club",
-    )?;
+    )
+    .map_err(|message| ExtractionFailure::new("managed_club", message))?;
     diagnostics.managed_club_pointer = Some(club);
     diagnostics.last_successful_read = Some("validate_managed_club".to_string());
     if let Some(progress) = progress {
@@ -1276,7 +1121,8 @@ fn index_full_player_database(
         .collect();
     let tactics_manager_vtable = module.base + profile.constants.tactics_manager_vtable_rva;
     let mut object_hits =
-        reader.scan_private_memory_for_pointers(&[player_vtable, tactics_manager_vtable])?;
+        scan_private_memory_for_pointers(reader, &[player_vtable, tactics_manager_vtable])
+            .map_err(|error| ExtractionFailure::new("player_database", error.to_string()))?;
     let candidate_addresses = object_hits.remove(&player_vtable).unwrap_or_default();
     let tactic_manager_hits = object_hits
         .remove(&tactics_manager_vtable)
@@ -1383,51 +1229,6 @@ fn read_indexed_player_candidate(
             .read_pointer(person.checked_add(profile.constants.person_contract_offset)?)
             .filter(|value| *value != 0),
     })
-}
-
-fn display_attribute(raw: u8) -> u8 {
-    ((raw.saturating_add(4)) / 5).clamp(1, 20)
-}
-
-fn visible_attribute_map(raw: &[u8]) -> HashMap<String, u8> {
-    PLAYER_ATTRIBUTE_NAMES
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| {
-            !HIDDEN_ATTRIBUTE_INDEXES.contains(index) && !matches!(*index, 24 | 25)
-        })
-        .filter_map(|(index, name)| {
-            raw.get(index)
-                .copied()
-                .map(|value| ((*name).to_string(), display_attribute(value)))
-        })
-        .collect()
-}
-
-fn preferred_foot_label(left: u8, right: u8) -> &'static str {
-    let difference = i16::from(left) - i16::from(right);
-    if difference >= 20 {
-        "Left"
-    } else if difference <= -20 {
-        "Right"
-    } else {
-        "Both"
-    }
-}
-
-fn default_role_for_position(position: &str) -> String {
-    match position {
-        "GK" => "Goalkeeper",
-        "SW" | "DC" => "Central Defender",
-        "DL" | "DR" | "WBL" | "WBR" => "Full-Back",
-        "DM" => "Defensive Midfielder",
-        "ML" | "MR" | "AML" | "AMR" => "Winger",
-        "MC" => "Central Midfielder",
-        "AMC" => "Attacking Midfielder",
-        "ST" => "Advanced Forward",
-        _ => "Natural Position",
-    }
-    .to_string()
 }
 
 fn visible_ability_score(position: &str, attributes: &HashMap<String, u8>) -> Option<u8> {
@@ -1636,120 +1437,6 @@ fn read_name_field(reader: &mut ProcessReader, field: u64) -> Option<String> {
     reader.read_length_prefixed_string(text)
 }
 
-#[cfg(target_os = "windows")]
-fn validate_vtable(
-    reader: &mut ProcessReader,
-    object: u64,
-    expected: u64,
-    stage: &'static str,
-) -> Result<(), ExtractionFailure> {
-    let actual = reader.read_pointer(object).ok_or_else(|| {
-        ExtractionFailure::new(stage, "A required FM26 object could not be read.")
-    })?;
-    if actual != expected {
-        return Err(ExtractionFailure::new(
-            stage,
-            format!(
-                "A required FM26 object failed type validation (expected {}, found {}). No data was shown.",
-                hex_address(expected),
-                hex_address(actual)
-            ),
-        ));
-    }
-    Ok(())
-}
-
-fn parse_pattern(pattern: &str) -> Result<Vec<Option<u8>>, ExtractionFailure> {
-    pattern
-        .split_whitespace()
-        .map(|token| {
-            if token == "??" || token == "?" {
-                Ok(None)
-            } else {
-                u8::from_str_radix(token, 16).map(Some).map_err(|_| {
-                    ExtractionFailure::new(
-                        "entity_map",
-                        "The embedded signature pattern is invalid.",
-                    )
-                })
-            }
-        })
-        .collect()
-}
-
-fn find_entity_map(identity: &ExecutableIdentity) -> Option<&'static EntityMapProfile> {
-    static INDEX: OnceLock<EntityMapIndex> = OnceLock::new();
-    let index = INDEX.get_or_init(|| {
-        serde_json::from_str(include_str!("../entity-maps/index.json"))
-            .expect("embedded entity-map index must be valid JSON")
-    });
-    if index.schema_version != 2 {
-        return None;
-    }
-    index.profiles.iter().find(|profile| {
-        let declared_shape_is_valid = !profile.module.is_empty()
-            && profile.build_fingerprint.executable_sha256 == profile.executable_sha256
-            && profile.build_fingerprint.file_version == profile.file_version
-            && profile.build_fingerprint.product_version == profile.product_version
-            && profile.build_fingerprint.architecture == profile.architecture
-            && profile.build_fingerprint.module == profile.module
-            && profile
-                .signatures
-                .iter()
-                .all(|signature| !signature.name.is_empty() && !signature.pattern.is_empty())
-            && profile.pointer_chains.iter().all(|chain| {
-                !chain.name.is_empty() && !chain.root.is_empty() && !chain.offsets.is_empty()
-            });
-        declared_shape_is_valid
-            && identity.file_version.as_deref() == Some(profile.file_version.as_str())
-            && identity.product_version.as_deref() == Some(profile.product_version.as_str())
-            && identity.sha256.as_deref() == Some(profile.executable_sha256.as_str())
-            && identity.architecture.as_deref() == Some(profile.architecture.as_str())
-    })
-}
-
-fn mapping_coverage(profile: &EntityMapProfile) -> Vec<MappingCoverage> {
-    let mut coverage: Vec<MappingCoverage> = profile
-        .sections
-        .iter()
-        .map(|(section, fields)| {
-            let mut item = MappingCoverage {
-                section: section.clone(),
-                validated: 0,
-                candidate: 0,
-                unmapped: 0,
-            };
-            for field in fields.values() {
-                let structurally_valid = !field.source.is_empty()
-                    && !field.value_type.is_empty()
-                    && field.confidence.is_finite()
-                    && (0.0..=1.0).contains(&field.confidence)
-                    && (field.status != "validated" || field_is_publishable(field));
-                let _transform_is_declared = field.transform.as_deref().unwrap_or("identity");
-                if !structurally_valid {
-                    item.unmapped += 1;
-                } else {
-                    match field.status.as_str() {
-                        "validated" => item.validated += 1,
-                        "candidate" => item.candidate += 1,
-                        _ => item.unmapped += 1,
-                    }
-                }
-            }
-            item
-        })
-        .collect();
-    coverage.sort_by(|left, right| left.section.cmp(&right.section));
-    coverage
-}
-
-fn field_is_publishable(field: &FieldDefinition) -> bool {
-    field.status == "validated"
-        && field.offset.is_some()
-        && field.confidence >= 0.95
-        && !field.validations.is_empty()
-}
-
 #[cfg(test)]
 fn checked_currency_transform(raw: i64, scale: u64, maximum: u64) -> Option<u64> {
     let value = u64::try_from(raw).ok()?.checked_mul(scale)?;
@@ -1841,394 +1528,13 @@ fn unix_milliseconds() -> String {
         .unwrap_or_default()
 }
 
-#[cfg(target_os = "windows")]
-#[derive(Clone, Copy)]
-struct ModuleInfo {
-    base: u64,
-    size: usize,
-}
-
-#[cfg(target_os = "windows")]
-#[derive(Clone, Copy)]
-struct MemoryRegion {
-    base: u64,
-    size: usize,
-}
-
-#[cfg(target_os = "windows")]
-struct ProcessReader {
-    handle: Handle,
-    bytes_read: usize,
-    last_error: Option<u32>,
-}
-
-#[cfg(target_os = "windows")]
-impl ProcessReader {
-    fn open(process_id: u32) -> Result<Self, u32> {
-        let handle = unsafe { OpenProcess(READ_ONLY_PROCESS_ACCESS, 0, process_id) };
-        if handle.is_null() {
-            return Err(unsafe { GetLastError() });
-        }
-        Ok(Self {
-            handle,
-            bytes_read: 0,
-            last_error: None,
-        })
-    }
-
-    fn process_path(&mut self) -> Option<String> {
-        let mut buffer = vec![0_u16; 32_768];
-        let mut size = buffer.len() as u32;
-        if unsafe { QueryFullProcessImageNameW(self.handle, 0, buffer.as_mut_ptr(), &mut size) }
-            == 0
-        {
-            self.last_error = Some(unsafe { GetLastError() });
-            return None;
-        }
-        Some(String::from_utf16_lossy(&buffer[..size as usize]))
-    }
-
-    fn module(&mut self, wanted_name: &str) -> Option<ModuleInfo> {
-        let mut modules = vec![std::ptr::null_mut(); 2048];
-        let mut needed = 0_u32;
-        if unsafe {
-            EnumProcessModulesEx(
-                self.handle,
-                modules.as_mut_ptr(),
-                (modules.len() * std::mem::size_of::<Handle>()) as u32,
-                &mut needed,
-                0x03,
-            )
-        } == 0
-        {
-            self.last_error = Some(unsafe { GetLastError() });
-            return None;
-        }
-        let count = (needed as usize / std::mem::size_of::<Handle>()).min(modules.len());
-        for module in modules.into_iter().take(count) {
-            let mut name = [0_u16; 1024];
-            let name_length = unsafe {
-                GetModuleBaseNameW(self.handle, module, name.as_mut_ptr(), name.len() as u32)
-            };
-            if name_length == 0 {
-                continue;
-            }
-            if String::from_utf16_lossy(&name[..name_length as usize])
-                .eq_ignore_ascii_case(wanted_name)
-            {
-                let mut info = NativeModuleInfo::default();
-                if unsafe {
-                    GetModuleInformation(
-                        self.handle,
-                        module,
-                        &mut info,
-                        std::mem::size_of::<NativeModuleInfo>() as u32,
-                    )
-                } == 0
-                {
-                    self.last_error = Some(unsafe { GetLastError() });
-                    return None;
-                }
-                return Some(ModuleInfo {
-                    base: info.base_of_dll as u64,
-                    size: info.size_of_image as usize,
-                });
-            }
-        }
-        None
-    }
-
-    fn read_bytes(&mut self, address: u64, size: usize) -> Option<Vec<u8>> {
-        let mut buffer = vec![0_u8; size];
-        let mut bytes_read = 0_usize;
-        let result = unsafe {
-            ReadProcessMemory(
-                self.handle,
-                address as *const std::ffi::c_void,
-                buffer.as_mut_ptr().cast(),
-                size,
-                &mut bytes_read,
-            )
-        };
-        self.bytes_read = self.bytes_read.saturating_add(bytes_read);
-        if result == 0 || bytes_read != size {
-            self.last_error = Some(unsafe { GetLastError() });
-            return None;
-        }
-        Some(buffer)
-    }
-
-    fn read_pointer(&mut self, address: u64) -> Option<u64> {
-        self.read_bytes(address, 8)
-            .map(|bytes| u64::from_le_bytes(bytes.try_into().expect("eight bytes")))
-    }
-
-    fn read_u32(&mut self, address: u64) -> Option<u32> {
-        self.read_bytes(address, 4)
-            .map(|bytes| u32::from_le_bytes(bytes.try_into().expect("four bytes")))
-    }
-
-    fn read_i32(&mut self, address: u64) -> Option<i32> {
-        self.read_bytes(address, 4)
-            .map(|bytes| i32::from_le_bytes(bytes.try_into().expect("four bytes")))
-    }
-
-    fn read_length_prefixed_string(&mut self, address: u64) -> Option<String> {
-        let length = self.read_u32(address)? as usize;
-        if length == 0 || length > MAX_STRING_BYTES {
-            return None;
-        }
-        let bytes = self.read_bytes(address + 4, length)?;
-        let value = String::from_utf8(bytes).ok()?;
-        if value.chars().any(char::is_control) {
-            return None;
-        }
-        Some(value)
-    }
-
-    fn scan_module(
-        &mut self,
-        module: ModuleInfo,
-        pattern: &[Option<u8>],
-    ) -> Result<Vec<u64>, ExtractionFailure> {
-        if pattern.is_empty() || module.size < pattern.len() {
-            return Err(ExtractionFailure::new(
-                "manager_signature",
-                "The manager signature is empty or larger than the game module.",
-            ));
-        }
-        const CHUNK_SIZE: usize = 4 * 1024 * 1024;
-        let overlap = pattern.len().saturating_sub(1);
-        let mut hits = Vec::new();
-        let mut offset = 0_usize;
-        while offset < module.size {
-            let read_start = offset.saturating_sub(if offset == 0 { 0 } else { overlap });
-            let read_size = CHUNK_SIZE
-                .saturating_add(if offset == 0 { 0 } else { overlap })
-                .min(module.size - read_start);
-            let bytes = self
-                .read_bytes(module.base + read_start as u64, read_size)
-                .ok_or_else(|| {
-                    ExtractionFailure::new(
-                        "manager_signature",
-                        "The FM26 game module could not be scanned with read-only access.",
-                    )
-                })?;
-            for position in 0..=bytes.len().saturating_sub(pattern.len()) {
-                let absolute_offset = read_start + position;
-                if offset != 0 && absolute_offset < offset {
-                    continue;
-                }
-                if pattern.iter().enumerate().all(|(index, expected)| {
-                    expected.is_none_or(|value| bytes[position + index] == value)
-                }) {
-                    hits.push(module.base + absolute_offset as u64);
-                }
-            }
-            offset = offset.saturating_add(CHUNK_SIZE);
-        }
-        Ok(hits)
-    }
-
-    fn scan_private_memory_for_pointers(
-        &mut self,
-        pointers: &[u64],
-    ) -> Result<HashMap<u64, Vec<u64>>, ExtractionFailure> {
-        const MEM_COMMIT: u32 = 0x1000;
-        const MEM_PRIVATE: u32 = 0x20000;
-        const PAGE_NOACCESS: u32 = 0x01;
-        const PAGE_GUARD: u32 = 0x100;
-        const CHUNK_SIZE: usize = 8 * 1024 * 1024;
-        const MAX_SCAN_BYTES: usize = 8 * 1024 * 1024 * 1024;
-
-        let mut regions = Vec::new();
-        let mut address = 0_u64;
-        let mut considered = 0_usize;
-        loop {
-            let mut info = NativeMemoryInfo::default();
-            let queried = unsafe {
-                VirtualQueryEx(
-                    self.handle,
-                    address as *const std::ffi::c_void,
-                    &mut info,
-                    std::mem::size_of::<NativeMemoryInfo>(),
-                )
-            };
-            if queried == 0 {
-                break;
-            }
-            let base = info.base_address as u64;
-            let size = info.region_size;
-            if size == 0 {
-                break;
-            }
-            let readable = info.state == MEM_COMMIT
-                && info.memory_type == MEM_PRIVATE
-                && info.protect & (PAGE_NOACCESS | PAGE_GUARD) == 0;
-            if readable && considered.saturating_add(size) <= MAX_SCAN_BYTES {
-                regions.push(MemoryRegion { base, size });
-                considered = considered.saturating_add(size);
-            }
-            let next = base.saturating_add(size as u64);
-            if next <= address {
-                break;
-            }
-            address = next;
-        }
-        if regions.is_empty() {
-            return Err(ExtractionFailure::new(
-                "player_database",
-                "No readable FM26 private-memory regions were available for player indexing.",
-            ));
-        }
-
-        let needles: Vec<(u64, [u8; 8])> = pointers
-            .iter()
-            .copied()
-            .map(|pointer| (pointer, pointer.to_le_bytes()))
-            .collect();
-        let mut hits: HashMap<u64, Vec<u64>> = pointers
-            .iter()
-            .copied()
-            .map(|pointer| (pointer, Vec::new()))
-            .collect();
-        for region in regions {
-            let mut offset = 0_usize;
-            while offset < region.size {
-                let size = CHUNK_SIZE.min(region.size - offset);
-                let Some(bytes) = self.read_bytes(region.base + offset as u64, size) else {
-                    offset = offset.saturating_add(size);
-                    continue;
-                };
-                let base = region.base + offset as u64;
-                let first_aligned = ((8 - (base as usize & 7)) & 7).min(bytes.len());
-                let mut position = first_aligned;
-                while position + 8 <= bytes.len() {
-                    for (pointer, needle) in &needles {
-                        if bytes[position..position + 8] == *needle {
-                            hits.entry(*pointer)
-                                .or_default()
-                                .push(base + position as u64);
-                        }
-                    }
-                    position += 8;
-                }
-                offset = offset.saturating_add(size);
-            }
-        }
-        Ok(hits)
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl Drop for ProcessReader {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.handle);
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-type Handle = *mut std::ffi::c_void;
-
-#[cfg(target_os = "windows")]
-#[repr(C)]
-#[derive(Default)]
-struct NativeModuleInfo {
-    base_of_dll: *mut std::ffi::c_void,
-    size_of_image: u32,
-    entry_point: *mut std::ffi::c_void,
-}
-
-#[cfg(target_os = "windows")]
-#[repr(C)]
-#[derive(Default)]
-struct NativeMemoryInfo {
-    base_address: *mut std::ffi::c_void,
-    allocation_base: *mut std::ffi::c_void,
-    allocation_protect: u32,
-    partition_id: u16,
-    alignment: u16,
-    region_size: usize,
-    state: u32,
-    protect: u32,
-    memory_type: u32,
-    alignment_two: u32,
-}
-
-#[cfg(target_os = "windows")]
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> Handle;
-    fn CloseHandle(handle: Handle) -> i32;
-    fn GetLastError() -> u32;
-    fn QueryFullProcessImageNameW(
-        process: Handle,
-        flags: u32,
-        file_name: *mut u16,
-        size: *mut u32,
-    ) -> i32;
-    fn ReadProcessMemory(
-        process: Handle,
-        base_address: *const std::ffi::c_void,
-        buffer: *mut std::ffi::c_void,
-        size: usize,
-        bytes_read: *mut usize,
-    ) -> i32;
-    fn VirtualQueryEx(
-        process: Handle,
-        address: *const std::ffi::c_void,
-        buffer: *mut NativeMemoryInfo,
-        length: usize,
-    ) -> usize;
-}
-
-#[cfg(target_os = "windows")]
-#[link(name = "psapi")]
-unsafe extern "system" {
-    fn EnumProcessModulesEx(
-        process: Handle,
-        modules: *mut Handle,
-        size: u32,
-        needed: *mut u32,
-        filter: u32,
-    ) -> i32;
-    fn GetModuleBaseNameW(process: Handle, module: Handle, base_name: *mut u16, size: u32) -> u32;
-    fn GetModuleInformation(
-        process: Handle,
-        module: Handle,
-        module_info: *mut NativeModuleInfo,
-        size: u32,
-    ) -> i32;
-}
-
-#[cfg(target_os = "windows")]
-fn find_fm26_process() -> Option<(u32, Option<String>)> {
-    let output = std::process::Command::new("tasklist")
-        .args(["/FI", "IMAGENAME eq fm.exe", "/FO", "CSV", "/NH"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let row = stdout
-        .lines()
-        .find(|line| line.to_ascii_lowercase().contains("fm.exe"))?;
-    let columns: Vec<&str> = row.trim().trim_matches('"').split("\",\"").collect();
-    let pid = columns.get(1)?.replace(',', "").parse::<u32>().ok()?;
-    Some((pid, None))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn find_fm26_process() -> Option<(u32, Option<String>)> {
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fm26::{
+        offsets::{embedded_entity_map_index, field_is_publishable, FieldDefinition},
+        permissions::READ_ONLY_PROCESS_ACCESS,
+    };
 
     #[test]
     fn connector_contract_never_requests_or_advertises_write_access() {
@@ -2238,8 +1544,7 @@ mod tests {
 
     #[test]
     fn exact_build_profile_is_embedded_and_read_only() {
-        let index: EntityMapIndex =
-            serde_json::from_str(include_str!("../entity-maps/index.json")).unwrap();
+        let index = embedded_entity_map_index();
         assert_eq!(index.schema_version, 2);
         assert_eq!(index.profiles.len(), 1);
         assert_eq!(index.profiles[0].module, "game_plugin.dll");
