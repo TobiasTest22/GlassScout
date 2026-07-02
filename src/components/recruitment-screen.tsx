@@ -38,12 +38,22 @@ type SortKey =
   | "age"
   | "nation"
   | "club"
+  | "position"
+  | "bestRole"
   | "roleFit"
   | "knowledge"
   | "form"
   | "xg90"
+  | "xa90"
+  | "dribbles90"
+  | "progressivePasses90"
+  | "tackles90"
+  | "aerialWinPct"
+  | "passPct"
   | "value"
   | "wage"
+  | "contract"
+  | "interest"
   | "recommendation";
 
 type SortDirection = "asc" | "desc";
@@ -110,9 +120,10 @@ type ScoutRoomViewState = {
   positionGroup: string;
   interestFilter: string;
   minRoleFit: number;
+  minAge: number;
   maxAge: number;
+  minMarketValue: number;
   maxMarketValue: number;
-  filtersOpen: boolean;
   sortKey: SortKey;
   sortDirection: SortDirection;
   page: number;
@@ -134,9 +145,10 @@ const defaultScoutRoomState: ScoutRoomViewState = {
   positionGroup: "All",
   interestFilter: "Any",
   minRoleFit: 0,
+  minAge: 16,
   maxAge: 40,
+  minMarketValue: 0,
   maxMarketValue: 200_000_000,
-  filtersOpen: true,
   sortKey: "relevance",
   sortDirection: "desc",
   page: 1,
@@ -600,7 +612,12 @@ function FormChips({ rating }: { rating: number | null }) {
 
 function PlayerNation({ nation }: { nation: string | null }) {
   const flag = nation ? nationFlags[nation] : null;
-  return <span className="nation-chip" title={nation ?? "Nation unknown"}>{flag ?? "—"}<small>{nation?.slice(0, 3).toUpperCase() ?? "UNK"}</small></span>;
+  return (
+    <span className="nation-chip" title={nation ?? "Nation unknown"}>
+      <b>{flag ?? "UNK"}</b>
+      <small>{nation ?? "Unknown"}</small>
+    </span>
+  );
 }
 
 function MetricCard({ title, value, note, active, icon, variant = "line", onClick }: {
@@ -622,6 +639,27 @@ function MetricCard({ title, value, note, active, icon, variant = "line", onClic
   );
 }
 
+function SortHeader({ value, activeKey, direction, children, onSort }: {
+  value: SortKey;
+  activeKey: SortKey;
+  direction: SortDirection;
+  children: ReactNode;
+  onSort: (value: SortKey) => void;
+}) {
+  const active = value === activeKey;
+  return (
+    <button
+      type="button"
+      className={active ? "sort-header active" : "sort-header"}
+      aria-label={`Sort by ${String(children)}${active ? `, currently ${direction === "asc" ? "ascending" : "descending"}` : ""}`}
+      onClick={() => onSort(value)}
+    >
+      <span>{children}</span>
+      <ArrowDownUp />
+    </button>
+  );
+}
+
 function SavedFilterButton({ value, active, label, detail, icon, onClick }: {
   value: SavedFilter;
   active: SavedFilter;
@@ -639,31 +677,51 @@ function SavedFilterButton({ value, active, label, detail, icon, onClick }: {
   );
 }
 
-function sortValue(row: PlayerRow, key: SortKey): string | number {
+function sortValue(row: PlayerRow, key: SortKey): string | number | null {
   switch (key) {
     case "name":
       return row.player.name;
     case "age":
-      return row.player.age ?? 999;
+      return row.player.age ?? null;
     case "nation":
-      return row.player.nationality ?? "";
+      return row.player.nationality ?? null;
     case "club":
-      return row.clubName ?? "";
+      return row.clubName ?? null;
+    case "position":
+      return row.player.positions.join(", ") || null;
+    case "bestRole":
+      return row.player.bestRole ?? null;
     case "roleFit":
-      return row.roleFitScore ?? -1;
+      return row.roleFitScore ?? null;
     case "knowledge":
-      return row.player.scoutConfidence ?? -1;
+      return row.player.scoutConfidence ?? null;
     case "form":
-      return row.formScore ?? -1;
+      return row.formScore ?? null;
     case "xg90":
-      return row.xg90 ?? -1;
+      return row.xg90 ?? null;
+    case "xa90":
+      return row.xa90 ?? null;
+    case "dribbles90":
+      return row.dribbles90 ?? null;
+    case "progressivePasses90":
+      return row.progressivePasses90 ?? null;
+    case "tackles90":
+      return row.tackles90 ?? null;
+    case "aerialWinPct":
+      return row.aerialWinPct ?? null;
+    case "passPct":
+      return row.passPct ?? null;
     case "value":
-      return row.valueAmount ?? Number.MAX_SAFE_INTEGER;
+      return row.valueAmount ?? null;
     case "wage":
-      return row.wageAmount ?? Number.MAX_SAFE_INTEGER;
+      return row.wageAmount ?? null;
+    case "contract":
+      return row.player.contractStatus ?? row.player.contractRemaining ?? null;
+    case "interest":
+      return row.joiningInterest;
     case "recommendation":
     case "relevance":
-      return row.recommendation.score ?? -1;
+      return row.recommendation.score ?? null;
   }
 }
 
@@ -672,6 +730,12 @@ function sortRows(rows: PlayerRow[], key: SortKey, direction: SortDirection) {
   return rows.toSorted((left, right) => {
     const leftValue = sortValue(left, key);
     const rightValue = sortValue(right, key);
+    const leftMissing = leftValue == null || leftValue === "";
+    const rightMissing = rightValue == null || rightValue === "";
+    if (leftMissing || rightMissing) {
+      if (leftMissing && rightMissing) return left.player.name.localeCompare(right.player.name);
+      return leftMissing ? 1 : -1;
+    }
     const comparison = typeof leftValue === "number" && typeof rightValue === "number"
       ? leftValue - rightValue
       : String(leftValue).localeCompare(String(rightValue));
@@ -801,9 +865,10 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
   const [positionGroup, setPositionGroup] = useState(initialView.positionGroup);
   const [interestFilter, setInterestFilter] = useState(initialView.interestFilter);
   const [minRoleFit, setMinRoleFit] = useState(initialView.minRoleFit);
+  const [minAge, setMinAge] = useState(initialView.minAge);
   const [maxAge, setMaxAge] = useState(initialView.maxAge);
+  const [minMarketValue, setMinMarketValue] = useState(initialView.minMarketValue);
   const [maxMarketValue, setMaxMarketValue] = useState(initialView.maxMarketValue);
-  const [filtersOpen, setFiltersOpen] = useState(initialView.filtersOpen);
   const [indexed, setIndexed] = useState<IndexedPlayerSearchResult[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>(initialView.sortKey);
   const [sortDirection, setSortDirection] = useState<SortDirection>(initialView.sortDirection);
@@ -838,14 +903,15 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
       positionGroup,
       interestFilter,
       minRoleFit,
+      minAge,
       maxAge,
+      minMarketValue,
       maxMarketValue,
-      filtersOpen,
       sortKey,
       sortDirection,
       page,
     } satisfies ScoutRoomViewState));
-  }, [age, club, contract, filtersOpen, interestFilter, interestedOnly, knowledge, marketValue, maxAge, maxMarketValue, minRoleFit, nationality, page, position, positionGroup, query, role, roleFit, savedFilter, sortDirection, sortKey]);
+  }, [age, club, contract, interestFilter, interestedOnly, knowledge, marketValue, maxAge, maxMarketValue, minAge, minMarketValue, minRoleFit, nationality, page, position, positionGroup, query, role, roleFit, savedFilter, sortDirection, sortKey]);
 
   const clubById = useMemo(() => new Map(snapshot.clubs.map((item) => [item.id, item])), [snapshot.clubs]);
   const favoriteIds = useMemo(() => new Set(favorites.map((record) => record.playerId)), [favorites]);
@@ -890,11 +956,13 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
         && (positionGroup === "All" || groupPlayerPosition(player) === positionGroup)
         && (interestFilter === "Any" || row.joiningInterest === interestFilter)
         && (row.roleFitScore == null || row.roleFitScore >= minRoleFit)
+        && (player.age == null || player.age >= minAge)
         && (player.age == null || player.age <= maxAge)
+        && (row.valueAmount == null || row.valueAmount >= minMarketValue)
         && (row.valueAmount == null || row.valueAmount <= maxMarketValue)
         && rowMatchesSavedFilter(row, savedFilter, favoriteIds);
     });
-  }, [age, club, contract, favoriteIds, interestFilter, interestedOnly, knowledge, marketValue, maxAge, maxMarketValue, minRoleFit, nationality, position, positionGroup, query, role, roleFit, rows, savedFilter]);
+  }, [age, club, contract, favoriteIds, interestFilter, interestedOnly, knowledge, marketValue, maxAge, maxMarketValue, minAge, minMarketValue, minRoleFit, nationality, position, positionGroup, query, role, roleFit, rows, savedFilter]);
 
   const sortedRows = useMemo(() => sortRows(filteredRows, sortKey, sortDirection), [filteredRows, sortDirection, sortKey]);
   const pageCount = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
@@ -914,6 +982,27 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
   }, [rows, snapshot.status.databasePlayersIndexed, snapshot.status.fullyScoutedPlayers, snapshot.status.partialScoutReports]);
 
   const tacticNeeds = useMemo(() => tacticNeedsFor(snapshot, rows), [rows, snapshot]);
+  const activeFilterCount = useMemo(() => [
+    query.trim(),
+    interestedOnly,
+    position !== "All",
+    role !== "All",
+    nationality !== "All",
+    club !== "All",
+    age !== "16 - 40",
+    marketValue !== "Any",
+    contract !== "Any",
+    roleFit !== "Any",
+    knowledge !== "All",
+    savedFilter !== "none",
+    positionGroup !== "All",
+    interestFilter !== "Any",
+    minRoleFit > 0,
+    minAge > 16,
+    maxAge < 40,
+    minMarketValue > 0,
+    maxMarketValue < 200_000_000,
+  ].filter(Boolean).length, [age, club, contract, interestFilter, interestedOnly, knowledge, marketValue, maxAge, maxMarketValue, minAge, minMarketValue, minRoleFit, nationality, position, positionGroup, query, role, roleFit, savedFilter]);
 
   const setPreset = (value: SavedFilter) => {
     setSavedFilter((current) => current === value ? "none" : value);
@@ -935,7 +1024,9 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
     setPositionGroup("All");
     setInterestFilter("Any");
     setMinRoleFit(0);
+    setMinAge(16);
     setMaxAge(40);
+    setMinMarketValue(0);
     setMaxMarketValue(200_000_000);
     setSortKey("relevance");
     setSortDirection("desc");
@@ -947,7 +1038,7 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
       setSortDirection((current) => current === "asc" ? "desc" : "asc");
     } else {
       setSortKey(value);
-      setSortDirection(value === "name" || value === "age" || value === "value" || value === "wage" ? "asc" : "desc");
+      setSortDirection(["name", "age", "nation", "club", "position", "bestRole", "contract", "interest", "value", "wage"].includes(value) ? "asc" : "desc");
     }
   };
 
@@ -961,9 +1052,17 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
         <div>
           <h1>Scout Room</h1>
           <span className="indexed-pill"><Database />{formatCount(snapshot.status.databasePlayersIndexed || rows.length)} indexed players</span>
-          <p>Search the indexed database and evaluate players using only the evidence we know.</p>
+          <p>Moneyball recruitment workspace: search the FM26 player index, compare role fit, per-90 production, value, wage and joining realism.</p>
+          <div className="model-pill-row" aria-label="Scout Room model inputs">
+            <span>Role fit model</span>
+            <span>Per-90 output</span>
+            <span>Value efficiency</span>
+            <span>Wage realism</span>
+            <span>Interest gate</span>
+          </div>
         </div>
         <div className="scout-view-actions">
+          <Button variant="outline" size="sm" onClick={resetFilters}><SlidersHorizontal data-icon="inline-start" />Clear filters {activeFilterCount ? `(${activeFilterCount})` : ""}</Button>
           <Button variant="outline" size="sm"><Star data-icon="inline-start" />Save View</Button>
           <Button variant="outline" size="sm">My Views <ChevronDown data-icon="inline-end" /></Button>
           <Button size="sm" className="dark-action">Actions <ChevronDown data-icon="inline-end" /></Button>
@@ -971,14 +1070,14 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
       </section>
 
       <section className="scout-metric-strip">
-        <MetricCard title="Indexed Players" value={formatCount(metrics.indexedCount)} note="+12.5% vs last week" icon={<Database />} onClick={resetFilters} active={savedFilter === "none"} />
-        <MetricCard title="Shortlisted" value={formatCount(favorites.length)} note="+18 vs last week" icon={<Star />} onClick={() => setPreset("shortlist")} active={savedFilter === "shortlist"} />
-        <MetricCard title="Fully Known" value={formatCount(metrics.fullyKnown)} note={`${metrics.indexedCount ? Math.round((metrics.fullyKnown / metrics.indexedCount) * 100) : 0}% of database`} icon={<ShieldCheck />} variant="donut" onClick={() => setKnowledge("Fully known")} active={knowledge === "Fully known"} />
-        <MetricCard title="Wonderkids (U23)" value={formatCount(metrics.wonderkids)} note="High-potential age band" icon={<Sparkles />} variant="donut" onClick={() => setPreset("u23")} active={savedFilter === "u23"} />
-        <MetricCard title="Bargain Opportunities" value={formatCount(metrics.bargains)} note="Market value < €15M" icon={<TrendingUp />} onClick={() => setPreset("value")} active={savedFilter === "value"} />
-        <MetricCard title="Avg. Recommendation" value={String(metrics.avgRecommendation)} note="+4 vs last 30 days" icon={<Target />} onClick={() => { setSortKey("recommendation"); setSortDirection("desc"); }} />
-        <MetricCard title="Scouted This Week" value={formatCompactCount(metrics.scoutedThisWeek)} note="+21 vs last week" icon={<Users />} variant="bars" onClick={() => setKnowledge("Partly known")} active={knowledge === "Partly known"} />
-        <MetricCard title="Role Fit Top Tactic" value={`${metrics.topTacticFit}%`} note={snapshot.tactic ? "Tactic-aware fit" : "Load tactic for precision"} icon={<SlidersHorizontal />} variant="donut" onClick={() => setRoleFit("70+")} active={roleFit === "70+"} />
+        <MetricCard title="Indexed database" value={formatCount(metrics.indexedCount)} note={`${formatCount(sortedRows.length)} visible in current view`} icon={<Database />} onClick={resetFilters} active={activeFilterCount === 0} />
+        <MetricCard title="Shortlist" value={formatCount(favorites.length)} note="Click to show saved targets" icon={<Star />} onClick={() => setPreset("shortlist")} active={savedFilter === "shortlist"} />
+        <MetricCard title="Fully known" value={formatCount(metrics.fullyKnown)} note={`${metrics.indexedCount ? Math.round((metrics.fullyKnown / metrics.indexedCount) * 100) : 0}% of indexed players`} icon={<ShieldCheck />} variant="donut" onClick={() => setKnowledge("Fully known")} active={knowledge === "Fully known"} />
+        <MetricCard title="U23 prospects" value={formatCount(metrics.wonderkids)} note="Young player discovery model" icon={<Sparkles />} variant="donut" onClick={() => setPreset("u23")} active={savedFilter === "u23"} />
+        <MetricCard title="Value window" value={formatCount(metrics.bargains)} note="Recommended under EUR 15M" icon={<TrendingUp />} onClick={() => setPreset("value")} active={savedFilter === "value"} />
+        <MetricCard title="Recommendation model" value={String(metrics.avgRecommendation)} note="Role fit + form + price + wage" icon={<Target />} onClick={() => { setSortKey("recommendation"); setSortDirection("desc"); }} />
+        <MetricCard title="Scouting evidence" value={formatCompactCount(metrics.scoutedThisWeek)} note="Known and partly known reports" icon={<Users />} variant="bars" onClick={() => setKnowledge("Partly known")} active={knowledge === "Partly known"} />
+        <MetricCard title="Top tactic fit" value={`${metrics.topTacticFit}%`} note={snapshot.tactic ? "Uses current tactic slots" : "Load tactic for precision"} icon={<SlidersHorizontal />} variant="donut" onClick={() => setRoleFit("70+")} active={roleFit === "70+"} />
       </section>
 
       <section className="scout-command-center">
@@ -1032,11 +1131,15 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
         )}
       </section>
 
-      <section className={filtersOpen ? "scout-database-layout" : "scout-database-layout filters-collapsed"}>
-        {filtersOpen ? (
+      <section className="scout-database-layout">
           <aside className="scout-left-filters">
-            <button className="hide-filters" type="button" onClick={() => setFiltersOpen(false)}><ChevronLeft />Hide Filters</button>
-            <button className="clear-filters" type="button" onClick={resetFilters}>CLEAR ALL</button>
+            <div className="filter-panel-title">
+              <div>
+                <span>Recruitment model</span>
+                <strong>Filter board</strong>
+              </div>
+              <button className="clear-filters" type="button" onClick={resetFilters}>Clear all</button>
+            </div>
             <div className="sidebar-search-filter">
               <Search />
               <Input aria-label="Search players" placeholder="Search any player..." value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -1062,11 +1165,19 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
               <div className="range-caption"><span>Min {minRoleFit}</span><span>Max 100</span></div>
               <input type="range" min={0} max={100} value={minRoleFit} onChange={(event) => setMinRoleFit(Number(event.target.value))} />
               <h3>Age</h3>
-              <div className="range-caption"><span>Min 16</span><span>Max {maxAge}</span></div>
-              <input type="range" min={16} max={40} value={maxAge} onChange={(event) => setMaxAge(Number(event.target.value))} />
+              <div className="range-input-pair">
+                <label><span>Min</span><input type="number" min={16} max={maxAge} value={minAge} onChange={(event) => setMinAge(Math.min(Number(event.target.value), maxAge))} /></label>
+                <label><span>Max</span><input type="number" min={minAge} max={40} value={maxAge} onChange={(event) => setMaxAge(Math.max(Number(event.target.value), minAge))} /></label>
+              </div>
+              <div className="range-caption"><span>{minAge}</span><span>{maxAge}</span></div>
+              <input type="range" min={16} max={40} value={maxAge} onChange={(event) => setMaxAge(Math.max(Number(event.target.value), minAge))} />
               <h3>Market Value</h3>
-              <div className="range-caption"><span>Min €0</span><span>Max €{Math.round(maxMarketValue / 1_000_000)}M</span></div>
-              <input type="range" min={1_000_000} max={200_000_000} step={1_000_000} value={maxMarketValue} onChange={(event) => setMaxMarketValue(Number(event.target.value))} />
+              <div className="range-input-pair">
+                <label><span>Min EUR M</span><input type="number" min={0} max={Math.round(maxMarketValue / 1_000_000)} value={Math.round(minMarketValue / 1_000_000)} onChange={(event) => setMinMarketValue(Math.min(Number(event.target.value) * 1_000_000, maxMarketValue))} /></label>
+                <label><span>Max EUR M</span><input type="number" min={Math.round(minMarketValue / 1_000_000)} max={200} value={Math.round(maxMarketValue / 1_000_000)} onChange={(event) => setMaxMarketValue(Math.max(Number(event.target.value) * 1_000_000, minMarketValue))} /></label>
+              </div>
+              <div className="range-caption"><span>EUR {Math.round(minMarketValue / 1_000_000)}M</span><span>EUR {Math.round(maxMarketValue / 1_000_000)}M</span></div>
+              <input type="range" min={1_000_000} max={200_000_000} step={1_000_000} value={maxMarketValue} onChange={(event) => setMaxMarketValue(Math.max(Number(event.target.value), minMarketValue))} />
             </div>
             <label className="side-select"><span>Role</span><select value={role} onChange={(event) => setRole(event.target.value)}>{filterOptions.roles.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label className="side-select"><span>Nationality</span><select value={nationality} onChange={(event) => setNationality(event.target.value)}>{filterOptions.nations.map((item) => <option key={item}>{item}</option>)}</select></label>
@@ -1078,9 +1189,6 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
             <label className="side-select"><span>Contract Expires</span><select value={contract} onChange={(event) => setContract(event.target.value)}>{["Any", "Expiring 12m", "Expiring 24m", "Free / no contract"].map((item) => <option key={item}>{item}</option>)}</select></label>
             <label className="side-select"><span>Interest in Joining</span><select value={interestFilter} onChange={(event) => setInterestFilter(event.target.value)}>{["Any", "Very interested", "Interested", "Slightly interested", "Only loan possible", "Only if promoted", "Only if wages are improved", "Only if guaranteed playing time", "Doubtful", "Not interested", "Unknown"].map((item) => <option key={item}>{item}</option>)}</select></label>
           </aside>
-        ) : (
-          <button className="show-filters-tab" type="button" onClick={() => setFiltersOpen(true)}><ChevronRight />Show Filters</button>
-        )}
 
         <section className="scout-table-panel">
           <div className="scout-table-toolbar">
@@ -1091,9 +1199,21 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
               ["roleFit", "Role fit"],
               ["form", "Form"],
               ["xg90", "xG/90"],
+              ["xa90", "xA/90"],
+              ["dribbles90", "Dribbles/90"],
+              ["progressivePasses90", "Progressive passes/90"],
+              ["tackles90", "Tackles/90"],
+              ["aerialWinPct", "Aerial %"],
+              ["passPct", "Pass %"],
               ["value", "Value"],
               ["wage", "Wage"],
+              ["contract", "Contract"],
+              ["interest", "Interest"],
               ["age", "Age"],
+              ["nation", "Nation"],
+              ["club", "Club"],
+              ["position", "Position"],
+              ["bestRole", "Best role"],
               ["name", "Name"],
             ].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button type="button" onClick={() => setSortDirection((value) => value === "asc" ? "desc" : "asc")}><ArrowDownUp /></button><button type="button"><Columns3 /></button><button type="button"><List /></button><button type="button"><LayoutGrid /></button></div>
           </div>
@@ -1103,33 +1223,33 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
               <thead>
                 <tr>
                   <th><input type="checkbox" aria-label="Select page" /></th>
-                  <th><button type="button" onClick={() => onSort("name")}>Player</button></th>
-                  <th><button type="button" onClick={() => onSort("age")}>Age</button></th>
-                  <th><button type="button" onClick={() => onSort("nation")}>Nat</button></th>
-                  <th><button type="button" onClick={() => onSort("club")}>Club</button></th>
-                  <th>Positions</th>
-                  <th>Best Role</th>
-                  <th><button type="button" onClick={() => onSort("roleFit")}>Role Fit</button></th>
-                  <th><button type="button" onClick={() => onSort("knowledge")}>Knowledge</button></th>
-                  <th><button type="button" onClick={() => onSort("form")}>Form (last 5)</button></th>
+                  <th><SortHeader value="name" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Player</SortHeader></th>
+                  <th><SortHeader value="age" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Age</SortHeader></th>
+                  <th><SortHeader value="nation" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Country</SortHeader></th>
+                  <th><SortHeader value="club" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Club</SortHeader></th>
+                  <th><SortHeader value="position" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Positions</SortHeader></th>
+                  <th><SortHeader value="bestRole" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Best Role</SortHeader></th>
+                  <th><SortHeader value="roleFit" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Role Fit</SortHeader></th>
+                  <th><SortHeader value="knowledge" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Knowledge</SortHeader></th>
+                  <th><SortHeader value="form" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Form (last 5)</SortHeader></th>
                   <th colSpan={7}>Key per 90 stats</th>
-                  <th><button type="button" onClick={() => onSort("value")}>Market Value</button></th>
-                  <th><button type="button" onClick={() => onSort("wage")}>Wage</button></th>
-                  <th>Contract</th>
-                  <th>Interest</th>
-                  <th><button type="button" onClick={() => onSort("recommendation")}>Recommendation</button></th>
+                  <th><SortHeader value="value" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Market Value</SortHeader></th>
+                  <th><SortHeader value="wage" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Wage</SortHeader></th>
+                  <th><SortHeader value="contract" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Contract</SortHeader></th>
+                  <th><SortHeader value="interest" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Interest</SortHeader></th>
+                  <th><SortHeader value="recommendation" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Recommendation</SortHeader></th>
                   <th>Shortlist</th>
                   <th>Action</th>
                 </tr>
                 <tr className="sub-columns">
                   <th colSpan={10} />
-                  <th>xG/90</th>
-                  <th>xA/90</th>
-                  <th>Drb/90</th>
-                  <th>Prg Pas/90</th>
-                  <th>Tkl/90</th>
-                  <th>Aerial %</th>
-                  <th>Pass %</th>
+                  <th><SortHeader value="xg90" activeKey={sortKey} direction={sortDirection} onSort={onSort}>xG/90</SortHeader></th>
+                  <th><SortHeader value="xa90" activeKey={sortKey} direction={sortDirection} onSort={onSort}>xA/90</SortHeader></th>
+                  <th><SortHeader value="dribbles90" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Drb/90</SortHeader></th>
+                  <th><SortHeader value="progressivePasses90" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Prg Pas/90</SortHeader></th>
+                  <th><SortHeader value="tackles90" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Tkl/90</SortHeader></th>
+                  <th><SortHeader value="aerialWinPct" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Aerial %</SortHeader></th>
+                  <th><SortHeader value="passPct" activeKey={sortKey} direction={sortDirection} onSort={onSort}>Pass %</SortHeader></th>
                   <th colSpan={7} />
                 </tr>
               </thead>

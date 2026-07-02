@@ -1091,6 +1091,25 @@ button:active,
 .joining-toggle button.on{background:var(--scout-green)}
 .joining-toggle button.on i{transform:translateX(14px)}
 .joining-toggle svg{width:13px;color:#718199}
+.model-pill-row{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:7px;
+  margin-top:11px;
+}
+.model-pill-row span{
+  display:inline-flex;
+  align-items:center;
+  min-height:25px;
+  padding:0 9px;
+  border:1px solid #dce9ed;
+  border-radius:999px;
+  background:#fff;
+  color:#49617d;
+  font-size:9px;
+  font-weight:800;
+}
 .more-filter-button{
   min-height:48px;
   border-color:var(--scout-border)!important;
@@ -1100,22 +1119,28 @@ button:active,
 }
 .scout-metric-strip{
   display:grid;
-  grid-template-columns:repeat(8,minmax(128px,1fr));
-  gap:9px;
-  margin:14px 0 13px;
+  grid-template-columns:repeat(4,minmax(178px,1fr));
+  gap:10px;
+  margin:14px 0 14px;
 }
 .scout-metric-card{
   position:relative;
-  min-height:104px;
-  padding:16px 15px 12px;
+  min-height:112px;
+  padding:16px 16px 14px;
   border:1px solid var(--scout-border);
-  border-radius:9px;
-  background:#fff;
+  border-radius:12px;
+  background:linear-gradient(180deg,#fff,#fbfdfe);
   text-align:left;
   overflow:hidden;
+  box-shadow:none;
+  transition:border-color .16s ease,background .16s ease,transform .16s ease;
 }
 .scout-metric-card.active,
-.scout-metric-card:hover{border-color:#b7dcd5;background:#fbfffe}
+.scout-metric-card:hover{
+  border-color:#a9d8ce;
+  background:#fbfffe;
+  transform:translateY(-1px);
+}
 .metric-title{
   display:flex;
   align-items:center;
@@ -1135,8 +1160,8 @@ button:active,
   color:var(--scout-green);
 }
 .metric-title svg{width:13px}
-.scout-metric-card strong{display:block;margin-top:9px;font-size:20px;line-height:1;font-weight:800;letter-spacing:-.04em}
-.scout-metric-card small{display:block;margin-top:6px;color:var(--scout-muted);font-size:8px}
+.scout-metric-card strong{display:block;margin-top:10px;font-size:23px;line-height:1;font-weight:850;letter-spacing:-.045em}
+.scout-metric-card small{display:block;max-width:145px;margin-top:7px;color:var(--scout-muted);font-size:9px;line-height:1.35}
 .metric-line{
   position:absolute;
   left:15px;
@@ -1327,38 +1352,51 @@ button:active,
 .tactic-need-empty span{font-size:9px}
 .scout-database-layout{
   display:grid;
-  grid-template-columns:212px minmax(0,1fr);
-  gap:12px;
+  grid-template-columns:278px minmax(0,1fr);
+  gap:14px;
   align-items:start;
 }
-.scout-database-layout.filters-collapsed{grid-template-columns:38px minmax(0,1fr)}
 .scout-left-filters{
   min-height:620px;
-  padding:13px;
+  padding:14px;
   border:1px solid var(--scout-border);
-  border-radius:10px;
-  background:#fff;
+  border-radius:12px;
+  background:linear-gradient(180deg,#fff,#fbfdfe);
+  box-shadow:none;
 }
-.hide-filters{
+.filter-panel-title{
   display:flex;
   align-items:center;
   justify-content:space-between;
-  width:100%;
-  padding:7px 0;
-  border:0;
-  background:transparent;
-  color:#546a85;
+  gap:12px;
+  margin-bottom:12px;
+}
+.filter-panel-title span{
+  display:block;
+  color:#7d8da1;
   font-size:8px;
-  font-weight:760;
+  font-weight:850;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.filter-panel-title strong{
+  display:block;
+  margin-top:3px;
+  color:#10244b;
+  font-size:15px;
+  letter-spacing:-.035em;
 }
 .hide-filters svg,.show-filters-tab svg{width:13px}
 .clear-filters{
-  margin:11px 0 10px;
-  border:0;
-  background:transparent;
-  color:#8593a5;
-  font-size:7px;
-  font-weight:800;
+  min-height:30px;
+  padding:0 10px;
+  border:1px solid #dbe8ef;
+  border-radius:999px;
+  background:#fff;
+  color:#31506f;
+  font-size:8px;
+  font-weight:850;
+  text-transform:none;
 }
 .saved-filter-block,
 .side-filter-section{
@@ -1425,6 +1463,32 @@ button:active,
 .range-stack input[type=range]{
   width:100%;
   accent-color:var(--scout-green);
+}
+.range-input-pair{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin-bottom:8px;
+}
+.range-input-pair label{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  color:#78899e;
+  font-size:7px;
+  font-weight:850;
+  text-transform:uppercase;
+}
+.range-input-pair input{
+  height:32px;
+  width:100%;
+  border:1px solid var(--scout-border);
+  border-radius:7px;
+  background:#fff;
+  color:#10244b;
+  font-size:10px;
+  font-weight:800;
+  padding:0 8px;
 }
 .range-caption{
   display:flex;
@@ -1510,7 +1574,7 @@ button:active,
 .scout-table-wrap{position:relative;overflow:auto;max-width:100%}
 .scout-database-table{
   width:100%;
-  min-width:2100px;
+  min-width:2320px;
   border-collapse:separate;
   border-spacing:0;
   background:#fff;
@@ -1542,6 +1606,22 @@ button:active,
   color:inherit;
   font:inherit;
   text-transform:inherit;
+}
+.scout-database-table th .sort-header{
+  width:100%;
+  justify-content:flex-start;
+  color:#56677f;
+  border-radius:6px;
+}
+.scout-database-table th .sort-header svg{
+  width:9px;
+  opacity:.38;
+}
+.scout-database-table th .sort-header.active{
+  color:#008d7e;
+}
+.scout-database-table th .sort-header.active svg{
+  opacity:1;
 }
 .scout-database-table .sub-columns th{
   height:24px;
@@ -1596,22 +1676,43 @@ button:active,
 .nation-chip{
   display:flex;
   align-items:center;
-  gap:5px;
-  min-width:42px;
+  gap:7px;
+  min-width:102px;
 }
-.nation-chip small{color:#304864;font-size:7px;font-weight:800}
+.nation-chip b{
+  display:inline-grid;
+  place-items:center;
+  min-width:30px;
+  height:22px;
+  padding:0 5px;
+  border:1px solid #dfe9ef;
+  border-radius:999px;
+  background:#f7fafc;
+  color:#314d6d;
+  font-size:7px;
+  font-weight:900;
+  line-height:1;
+}
+.nation-chip small{
+  max-width:82px;
+  overflow:hidden;
+  color:#304864;
+  font-size:8px;
+  font-weight:800;
+  text-overflow:ellipsis;
+}
 .club-cell{
   flex-direction:row;
   align-items:center;
   gap:7px;
-  min-width:86px;
+  min-width:126px;
 }
 .club-cell .club-logo{
   width:19px!important;
   height:19px!important;
   border-radius:50%!important;
 }
-.club-cell span{max-width:76px;overflow:hidden;text-overflow:ellipsis}
+.club-cell span{max-width:108px;overflow:hidden;text-overflow:ellipsis}
 .position-pills{
   display:flex;
   gap:5px;

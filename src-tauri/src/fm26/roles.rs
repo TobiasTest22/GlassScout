@@ -99,79 +99,1320 @@ macro_rules! oop_role {
 }
 
 pub(crate) const ROLE_DEFINITIONS: &[RoleDefinition] = &[
-    ip_role!("goalkeeper", "Goalkeeper", "GK", 1, ["GK"], ["Aerial Reach", "Command of Area", "Communication", "Handling", "Reflexes", "Agility", "Concentration", "Positioning"], ["Kicking", "One on Ones", "Throwing", "Anticipation", "Decisions"]),
-    ip_role!("ball_playing_goalkeeper", "Ball-Playing Goalkeeper", "BPGK", 4_096, ["GK"], ["Aerial Reach", "Command of Area", "Communication", "Handling", "Kicking", "Reflexes", "Agility", "Concentration", "Positioning"], ["Eccentricity", "One on Ones", "Throwing", "Anticipation", "Composure", "Decisions", "Passing"]),
-    ip_role!("no_nonsense_goalkeeper", "No-Nonsense Goalkeeper", "NNGK", 9_007_199_254_740_992, ["GK"], ["Aerial Reach", "Command of Area", "Communication", "Handling", "Reflexes", "Agility", "Concentration", "Positioning"], ["One on Ones", "Anticipation", "Decisions"]),
-    ip_role!("centre_back", "Centre-Back", "CB", 2, ["DC"], ["Heading", "Marking", "Tackling", "Anticipation", "Positioning", "Jumping Reach", "Strength"], ["Aggression", "Bravery", "Composure", "Concentration", "Decisions", "Pace"]),
-    ip_role!("ball_playing_centre_back", "Ball-Playing Centre-Back", "BPCB", 16_777_216, ["DC"], ["Heading", "Marking", "Passing", "Tackling", "Anticipation", "Composure", "Positioning", "Jumping Reach", "Strength"], ["First Touch", "Technique", "Aggression", "Bravery", "Concentration", "Decisions", "Vision", "Pace"]),
-    ip_role!("no_nonsense_centre_back", "No-Nonsense Centre-Back", "NNCB", 536_870_912, ["DC"], ["Heading", "Marking", "Tackling", "Anticipation", "Positioning", "Jumping Reach", "Strength"], ["Aggression", "Bravery", "Concentration", "Pace"]),
-    ip_role!("wide_centre_back", "Wide Centre-Back", "WCB", 2_251_799_813_685_248, ["DC"], ["Heading", "Marking", "Tackling", "Anticipation", "Positioning", "Jumping Reach", "Strength"], ["Dribbling", "Aggression", "Bravery", "Composure", "Concentration", "Decisions", "Work Rate", "Acceleration", "Agility", "Pace", "Stamina"]),
-    ip_role!("advanced_centre_back", "Advanced Centre-Back", "ACB", 16_384, ["DC", "SW"], ["Heading", "Marking", "Passing", "Tackling", "Technique", "Anticipation", "Composure", "Decisions", "Positioning", "Teamwork", "Jumping Reach", "Strength"], ["Dribbling", "First Touch", "Aggression", "Bravery", "Concentration", "Vision", "Pace", "Stamina"]),
-    ip_role!("overlapping_centre_back", "Overlapping Centre-Back", "OCB", 18_014_398_509_481_984, ["DC"], ["Crossing", "Heading", "Marking", "Tackling", "Anticipation", "Work Rate", "Jumping Reach", "Pace", "Stamina", "Strength"], ["Dribbling", "Technique", "Aggression", "Bravery", "Composure", "Concentration", "Decisions", "Off the Ball", "Positioning", "Acceleration", "Agility"]),
-    ip_role!("full_back", "Full-Back", "FB", 4, ["DL", "DR"], ["Marking", "Tackling", "Anticipation", "Concentration", "Positioning", "Teamwork", "Acceleration"], ["Crossing", "Dribbling", "Passing", "Technique", "Decisions", "Work Rate", "Agility", "Pace", "Stamina"]),
-    ip_role!("inside_full_back", "Inside Full-Back", "IFB", 4_503_599_627_370_496, ["DL", "DR"], ["Heading", "Marking", "Tackling", "Anticipation", "Positioning", "Strength"], ["Dribbling", "Aggression", "Bravery", "Composure", "Concentration", "Decisions", "Work Rate", "Acceleration", "Agility", "Jumping Reach", "Pace", "Stamina"]),
-    ip_role!("inside_wing_back", "Inside Wing-Back", "IWB", 17_592_186_044_416, ["DL", "DR", "WBL", "WBR"], ["Passing", "Tackling", "Anticipation", "Composure", "Decisions", "Positioning", "Teamwork", "Acceleration"], ["First Touch", "Marking", "Technique", "Concentration", "Work Rate", "Agility", "Pace", "Stamina"]),
-    ip_role!("playmaking_wing_back", "Playmaking Wing-Back", "PWB", 36_028_797_018_963_968, ["DL", "DR", "WBL", "WBR"], ["First Touch", "Passing", "Tackling", "Technique", "Composure", "Decisions", "Positioning", "Teamwork", "Vision", "Acceleration"], ["Crossing", "Dribbling", "Marking", "Anticipation", "Concentration", "Off the Ball", "Work Rate", "Agility", "Pace", "Stamina"]),
-    ip_role!("wing_back", "Wing-Back", "WB", 8, ["DL", "DR", "WBL", "WBR"], ["Crossing", "Marking", "Tackling", "Teamwork", "Work Rate", "Acceleration", "Pace", "Stamina"], ["Dribbling", "First Touch", "Passing", "Technique", "Anticipation", "Concentration", "Decisions", "Off the Ball", "Positioning", "Agility", "Balance"]),
-    ip_role!("advanced_wing_back", "Advanced Wing-Back", "AWB", 274_877_906_944, ["DL", "DR", "WBL", "WBR"], ["Crossing", "Dribbling", "Technique", "Off the Ball", "Teamwork", "Work Rate", "Acceleration", "Agility", "Pace", "Stamina"], ["First Touch", "Marking", "Passing", "Tackling", "Anticipation", "Decisions", "Flair", "Positioning", "Balance"]),
-    ip_role!("defensive_midfielder", "Defensive Midfielder", "DM", 16, ["DM"], ["Tackling", "Anticipation", "Concentration", "Positioning", "Teamwork"], ["First Touch", "Marking", "Passing", "Aggression", "Composure", "Decisions", "Work Rate", "Stamina", "Strength"]),
-    ip_role!("box_to_box_midfielder", "Box-to-Box Midfielder", "BBM", 65_536, ["DM", "MC"], ["Passing", "Tackling", "Off the Ball", "Teamwork", "Work Rate", "Stamina"], ["Dribbling", "Finishing", "First Touch", "Long Shots", "Technique", "Aggression", "Anticipation", "Composure", "Decisions", "Positioning", "Acceleration", "Balance", "Pace", "Strength"]),
-    ip_role!("box_to_box_playmaker", "Box-to-Box Playmaker", "BBP", 70_368_744_177_664, ["DM", "MC"], ["First Touch", "Passing", "Technique", "Composure", "Decisions", "Off the Ball", "Teamwork", "Vision", "Work Rate", "Stamina"], ["Dribbling", "Marking", "Tackling", "Anticipation", "Positioning", "Acceleration", "Agility", "Balance", "Pace"]),
-    ip_role!("deep_lying_playmaker", "Deep-Lying Playmaker", "DLP", 32_768, ["DM", "MC"], ["First Touch", "Passing", "Technique", "Composure", "Decisions", "Off the Ball", "Teamwork", "Vision"], ["Marking", "Tackling", "Anticipation", "Concentration", "Positioning", "Work Rate", "Balance", "Stamina"]),
-    ip_role!("half_back", "Half-Back", "HB", 34_359_738_368, ["DM"], ["Heading", "Marking", "Tackling", "Anticipation", "Concentration", "Positioning", "Teamwork", "Jumping Reach", "Strength"], ["First Touch", "Passing", "Aggression", "Bravery", "Composure", "Decisions", "Work Rate", "Stamina"]),
-    ip_role!("central_midfielder", "Central Midfielder", "CM", 32, ["MC"], ["First Touch", "Passing", "Tackling", "Decisions", "Teamwork"], ["Technique", "Anticipation", "Composure", "Concentration", "Off the Ball", "Positioning", "Vision", "Work Rate", "Stamina"]),
-    ip_role!("advanced_playmaker", "Advanced Playmaker", "AP", 131_072, ["MC", "AMC"], ["First Touch", "Passing", "Technique", "Composure", "Decisions", "Off the Ball", "Teamwork", "Vision"], ["Crossing", "Dribbling", "Anticipation", "Flair", "Acceleration", "Agility"]),
-    ip_role!("midfield_playmaker", "Midfield Playmaker", "MP", 144_115_188_075_855_872, ["MC"], ["First Touch", "Passing", "Technique", "Composure", "Decisions", "Off the Ball", "Teamwork", "Vision"], ["Dribbling", "Tackling", "Anticipation", "Flair", "Positioning", "Work Rate", "Agility", "Stamina"]),
-    ip_role!("wide_central_midfielder", "Wide Central Midfielder", "WCM", 281_474_976_710_656, ["MC"], ["First Touch", "Passing", "Tackling", "Decisions", "Teamwork"], ["Crossing", "Dribbling", "Technique", "Anticipation", "Composure", "Concentration", "Off the Ball", "Positioning", "Vision", "Work Rate", "Agility", "Stamina"]),
-    ip_role!("wide_midfielder", "Wide Midfielder", "WM", 64, ["ML", "MR"], ["Crossing", "Passing", "Technique", "Teamwork", "Work Rate", "Pace", "Stamina"], ["Dribbling", "First Touch", "Anticipation", "Composure", "Off the Ball", "Vision", "Acceleration", "Agility"]),
-    ip_role!("inside_winger", "Inside Winger", "IW", 562_949_953_421_312, ["ML", "MR", "AML", "AMR"], ["Dribbling", "First Touch", "Technique", "Composure", "Teamwork", "Acceleration", "Agility"], ["Crossing", "Long Shots", "Passing", "Anticipation", "Flair", "Off the Ball", "Vision", "Work Rate", "Balance", "Pace", "Stamina"]),
-    ip_role!("playmaking_winger", "Playmaking Winger", "PW", 8_796_093_022_208, ["ML", "MR", "AML", "AMR"], ["Crossing", "Dribbling", "First Touch", "Passing", "Technique", "Composure", "Decisions", "Off the Ball", "Teamwork", "Vision", "Acceleration"], ["Anticipation", "Flair", "Work Rate", "Agility", "Pace", "Stamina"]),
-    ip_role!("winger", "Winger", "W", 128, ["ML", "MR", "AML", "AMR"], ["Crossing", "Dribbling", "Technique", "Teamwork", "Acceleration", "Agility", "Pace"], ["First Touch", "Passing", "Anticipation", "Flair", "Off the Ball", "Work Rate", "Balance", "Stamina"]),
-    ip_role!("attacking_midfielder", "Attacking Midfielder", "AM", 512, ["AMC"], ["First Touch", "Long Shots", "Passing", "Technique", "Composure", "Flair", "Off the Ball"], ["Crossing", "Dribbling", "Finishing", "Anticipation", "Decisions", "Vision", "Acceleration", "Agility"]),
-    ip_role!("channel_midfielder", "Channel Midfielder", "CHM", 72_057_594_037_927_936, ["AMC", "MC"], ["Crossing", "First Touch", "Passing", "Technique", "Composure", "Off the Ball", "Work Rate", "Acceleration"], ["Dribbling", "Long Shots", "Anticipation", "Decisions", "Flair", "Vision", "Agility", "Pace", "Stamina"]),
-    ip_role!("free_role", "Free Role", "FR", 4_294_967_296, ["AMC"], ["Dribbling", "First Touch", "Long Shots", "Passing", "Technique", "Composure", "Flair", "Off the Ball", "Vision"], ["Crossing", "Finishing", "Anticipation", "Decisions", "Acceleration", "Agility"]),
-    ip_role!("second_striker", "Second Striker", "SS", 2_199_023_255_552, ["AMC"], ["Finishing", "First Touch", "Anticipation", "Composure", "Off the Ball", "Acceleration"], ["Dribbling", "Long Shots", "Passing", "Technique", "Concentration", "Decisions", "Work Rate", "Agility", "Pace", "Stamina"]),
-    ip_role!("wide_forward", "Wide Forward", "WF", 35_184_372_088_832, ["AML", "AMR"], ["Dribbling", "First Touch", "Technique", "Anticipation", "Off the Ball", "Acceleration", "Agility", "Pace"], ["Crossing", "Finishing", "Passing", "Composure", "Flair", "Work Rate", "Balance", "Stamina"]),
-    ip_role!("inside_forward", "Inside Forward", "IF", 134_217_728, ["AML", "AMR"], ["Dribbling", "First Touch", "Technique", "Anticipation", "Composure", "Off the Ball", "Acceleration", "Agility"], ["Crossing", "Finishing", "Long Shots", "Passing", "Flair", "Vision", "Work Rate", "Balance", "Pace", "Stamina"]),
-    ip_role!("centre_forward", "Centre Forward", "CF", 2_048, ["ST"], ["Finishing", "First Touch", "Heading", "Technique", "Composure", "Off the Ball", "Acceleration", "Strength"], ["Dribbling", "Passing", "Anticipation", "Decisions", "Agility", "Balance", "Jumping Reach", "Pace"]),
-    ip_role!("channel_forward", "Channel Forward", "CHF", 2_147_483_648, ["ST"], ["Dribbling", "Finishing", "First Touch", "Technique", "Composure", "Off the Ball", "Work Rate", "Acceleration"], ["Crossing", "Heading", "Passing", "Anticipation", "Decisions", "Agility", "Balance", "Pace", "Stamina"]),
-    ip_role!("deep_lying_forward", "Deep-Lying Forward", "DLF", 1_024, ["ST"], ["Finishing", "First Touch", "Technique", "Composure", "Off the Ball", "Strength"], ["Dribbling", "Passing", "Anticipation", "Decisions", "Teamwork", "Vision", "Balance"]),
-    ip_role!("false_nine", "False Nine", "F9", 1_099_511_627_776, ["ST"], ["Dribbling", "First Touch", "Passing", "Technique", "Composure", "Decisions", "Off the Ball", "Teamwork", "Vision", "Acceleration"], ["Finishing", "Anticipation", "Flair", "Agility", "Balance"]),
-    ip_role!("poacher", "Poacher", "P", 524_288, ["ST"], ["Finishing", "Heading", "Anticipation", "Composure", "Concentration", "Off the Ball", "Acceleration"], ["First Touch", "Technique", "Decisions", "Balance"]),
-    ip_role!("target_forward", "Target Forward", "TF", 262_144, ["ST"], ["Finishing", "Heading", "Aggression", "Bravery", "Composure", "Off the Ball", "Balance", "Jumping Reach", "Strength"], ["First Touch", "Anticipation", "Decisions", "Teamwork"]),
+    ip_role!(
+        "goalkeeper",
+        "Goalkeeper",
+        "GK",
+        1,
+        ["GK"],
+        [
+            "Aerial Reach",
+            "Command of Area",
+            "Communication",
+            "Handling",
+            "Reflexes",
+            "Agility",
+            "Concentration",
+            "Positioning"
+        ],
+        [
+            "Kicking",
+            "One on Ones",
+            "Throwing",
+            "Anticipation",
+            "Decisions"
+        ]
+    ),
+    ip_role!(
+        "ball_playing_goalkeeper",
+        "Ball-Playing Goalkeeper",
+        "BPGK",
+        4_096,
+        ["GK"],
+        [
+            "Aerial Reach",
+            "Command of Area",
+            "Communication",
+            "Handling",
+            "Kicking",
+            "Reflexes",
+            "Agility",
+            "Concentration",
+            "Positioning"
+        ],
+        [
+            "Eccentricity",
+            "One on Ones",
+            "Throwing",
+            "Anticipation",
+            "Composure",
+            "Decisions",
+            "Passing"
+        ]
+    ),
+    ip_role!(
+        "no_nonsense_goalkeeper",
+        "No-Nonsense Goalkeeper",
+        "NNGK",
+        9_007_199_254_740_992,
+        ["GK"],
+        [
+            "Aerial Reach",
+            "Command of Area",
+            "Communication",
+            "Handling",
+            "Reflexes",
+            "Agility",
+            "Concentration",
+            "Positioning"
+        ],
+        ["One on Ones", "Anticipation", "Decisions"]
+    ),
+    ip_role!(
+        "centre_back",
+        "Centre-Back",
+        "CB",
+        2,
+        ["DC"],
+        [
+            "Heading",
+            "Marking",
+            "Tackling",
+            "Anticipation",
+            "Positioning",
+            "Jumping Reach",
+            "Strength"
+        ],
+        [
+            "Aggression",
+            "Bravery",
+            "Composure",
+            "Concentration",
+            "Decisions",
+            "Pace"
+        ]
+    ),
+    ip_role!(
+        "ball_playing_centre_back",
+        "Ball-Playing Centre-Back",
+        "BPCB",
+        16_777_216,
+        ["DC"],
+        [
+            "Heading",
+            "Marking",
+            "Passing",
+            "Tackling",
+            "Anticipation",
+            "Composure",
+            "Positioning",
+            "Jumping Reach",
+            "Strength"
+        ],
+        [
+            "First Touch",
+            "Technique",
+            "Aggression",
+            "Bravery",
+            "Concentration",
+            "Decisions",
+            "Vision",
+            "Pace"
+        ]
+    ),
+    ip_role!(
+        "no_nonsense_centre_back",
+        "No-Nonsense Centre-Back",
+        "NNCB",
+        536_870_912,
+        ["DC"],
+        [
+            "Heading",
+            "Marking",
+            "Tackling",
+            "Anticipation",
+            "Positioning",
+            "Jumping Reach",
+            "Strength"
+        ],
+        ["Aggression", "Bravery", "Concentration", "Pace"]
+    ),
+    ip_role!(
+        "wide_centre_back",
+        "Wide Centre-Back",
+        "WCB",
+        2_251_799_813_685_248,
+        ["DC"],
+        [
+            "Heading",
+            "Marking",
+            "Tackling",
+            "Anticipation",
+            "Positioning",
+            "Jumping Reach",
+            "Strength"
+        ],
+        [
+            "Dribbling",
+            "Aggression",
+            "Bravery",
+            "Composure",
+            "Concentration",
+            "Decisions",
+            "Work Rate",
+            "Acceleration",
+            "Agility",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "advanced_centre_back",
+        "Advanced Centre-Back",
+        "ACB",
+        16_384,
+        ["DC", "SW"],
+        [
+            "Heading",
+            "Marking",
+            "Passing",
+            "Tackling",
+            "Technique",
+            "Anticipation",
+            "Composure",
+            "Decisions",
+            "Positioning",
+            "Teamwork",
+            "Jumping Reach",
+            "Strength"
+        ],
+        [
+            "Dribbling",
+            "First Touch",
+            "Aggression",
+            "Bravery",
+            "Concentration",
+            "Vision",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "overlapping_centre_back",
+        "Overlapping Centre-Back",
+        "OCB",
+        18_014_398_509_481_984,
+        ["DC"],
+        [
+            "Crossing",
+            "Heading",
+            "Marking",
+            "Tackling",
+            "Anticipation",
+            "Work Rate",
+            "Jumping Reach",
+            "Pace",
+            "Stamina",
+            "Strength"
+        ],
+        [
+            "Dribbling",
+            "Technique",
+            "Aggression",
+            "Bravery",
+            "Composure",
+            "Concentration",
+            "Decisions",
+            "Off the Ball",
+            "Positioning",
+            "Acceleration",
+            "Agility"
+        ]
+    ),
+    ip_role!(
+        "full_back",
+        "Full-Back",
+        "FB",
+        4,
+        ["DL", "DR"],
+        [
+            "Marking",
+            "Tackling",
+            "Anticipation",
+            "Concentration",
+            "Positioning",
+            "Teamwork",
+            "Acceleration"
+        ],
+        [
+            "Crossing",
+            "Dribbling",
+            "Passing",
+            "Technique",
+            "Decisions",
+            "Work Rate",
+            "Agility",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "inside_full_back",
+        "Inside Full-Back",
+        "IFB",
+        4_503_599_627_370_496,
+        ["DL", "DR"],
+        [
+            "Heading",
+            "Marking",
+            "Tackling",
+            "Anticipation",
+            "Positioning",
+            "Strength"
+        ],
+        [
+            "Dribbling",
+            "Aggression",
+            "Bravery",
+            "Composure",
+            "Concentration",
+            "Decisions",
+            "Work Rate",
+            "Acceleration",
+            "Agility",
+            "Jumping Reach",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "inside_wing_back",
+        "Inside Wing-Back",
+        "IWB",
+        17_592_186_044_416,
+        ["DL", "DR", "WBL", "WBR"],
+        [
+            "Passing",
+            "Tackling",
+            "Anticipation",
+            "Composure",
+            "Decisions",
+            "Positioning",
+            "Teamwork",
+            "Acceleration"
+        ],
+        [
+            "First Touch",
+            "Marking",
+            "Technique",
+            "Concentration",
+            "Work Rate",
+            "Agility",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "playmaking_wing_back",
+        "Playmaking Wing-Back",
+        "PWB",
+        36_028_797_018_963_968,
+        ["DL", "DR", "WBL", "WBR"],
+        [
+            "First Touch",
+            "Passing",
+            "Tackling",
+            "Technique",
+            "Composure",
+            "Decisions",
+            "Positioning",
+            "Teamwork",
+            "Vision",
+            "Acceleration"
+        ],
+        [
+            "Crossing",
+            "Dribbling",
+            "Marking",
+            "Anticipation",
+            "Concentration",
+            "Off the Ball",
+            "Work Rate",
+            "Agility",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "wing_back",
+        "Wing-Back",
+        "WB",
+        8,
+        ["DL", "DR", "WBL", "WBR"],
+        [
+            "Crossing",
+            "Marking",
+            "Tackling",
+            "Teamwork",
+            "Work Rate",
+            "Acceleration",
+            "Pace",
+            "Stamina"
+        ],
+        [
+            "Dribbling",
+            "First Touch",
+            "Passing",
+            "Technique",
+            "Anticipation",
+            "Concentration",
+            "Decisions",
+            "Off the Ball",
+            "Positioning",
+            "Agility",
+            "Balance"
+        ]
+    ),
+    ip_role!(
+        "advanced_wing_back",
+        "Advanced Wing-Back",
+        "AWB",
+        274_877_906_944,
+        ["DL", "DR", "WBL", "WBR"],
+        [
+            "Crossing",
+            "Dribbling",
+            "Technique",
+            "Off the Ball",
+            "Teamwork",
+            "Work Rate",
+            "Acceleration",
+            "Agility",
+            "Pace",
+            "Stamina"
+        ],
+        [
+            "First Touch",
+            "Marking",
+            "Passing",
+            "Tackling",
+            "Anticipation",
+            "Decisions",
+            "Flair",
+            "Positioning",
+            "Balance"
+        ]
+    ),
+    ip_role!(
+        "defensive_midfielder",
+        "Defensive Midfielder",
+        "DM",
+        16,
+        ["DM"],
+        [
+            "Tackling",
+            "Anticipation",
+            "Concentration",
+            "Positioning",
+            "Teamwork"
+        ],
+        [
+            "First Touch",
+            "Marking",
+            "Passing",
+            "Aggression",
+            "Composure",
+            "Decisions",
+            "Work Rate",
+            "Stamina",
+            "Strength"
+        ]
+    ),
+    ip_role!(
+        "box_to_box_midfielder",
+        "Box-to-Box Midfielder",
+        "BBM",
+        65_536,
+        ["DM", "MC"],
+        [
+            "Passing",
+            "Tackling",
+            "Off the Ball",
+            "Teamwork",
+            "Work Rate",
+            "Stamina"
+        ],
+        [
+            "Dribbling",
+            "Finishing",
+            "First Touch",
+            "Long Shots",
+            "Technique",
+            "Aggression",
+            "Anticipation",
+            "Composure",
+            "Decisions",
+            "Positioning",
+            "Acceleration",
+            "Balance",
+            "Pace",
+            "Strength"
+        ]
+    ),
+    ip_role!(
+        "box_to_box_playmaker",
+        "Box-to-Box Playmaker",
+        "BBP",
+        70_368_744_177_664,
+        ["DM", "MC"],
+        [
+            "First Touch",
+            "Passing",
+            "Technique",
+            "Composure",
+            "Decisions",
+            "Off the Ball",
+            "Teamwork",
+            "Vision",
+            "Work Rate",
+            "Stamina"
+        ],
+        [
+            "Dribbling",
+            "Marking",
+            "Tackling",
+            "Anticipation",
+            "Positioning",
+            "Acceleration",
+            "Agility",
+            "Balance",
+            "Pace"
+        ]
+    ),
+    ip_role!(
+        "deep_lying_playmaker",
+        "Deep-Lying Playmaker",
+        "DLP",
+        32_768,
+        ["DM", "MC"],
+        [
+            "First Touch",
+            "Passing",
+            "Technique",
+            "Composure",
+            "Decisions",
+            "Off the Ball",
+            "Teamwork",
+            "Vision"
+        ],
+        [
+            "Marking",
+            "Tackling",
+            "Anticipation",
+            "Concentration",
+            "Positioning",
+            "Work Rate",
+            "Balance",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "half_back",
+        "Half-Back",
+        "HB",
+        34_359_738_368,
+        ["DM"],
+        [
+            "Heading",
+            "Marking",
+            "Tackling",
+            "Anticipation",
+            "Concentration",
+            "Positioning",
+            "Teamwork",
+            "Jumping Reach",
+            "Strength"
+        ],
+        [
+            "First Touch",
+            "Passing",
+            "Aggression",
+            "Bravery",
+            "Composure",
+            "Decisions",
+            "Work Rate",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "central_midfielder",
+        "Central Midfielder",
+        "CM",
+        32,
+        ["MC"],
+        [
+            "First Touch",
+            "Passing",
+            "Tackling",
+            "Decisions",
+            "Teamwork"
+        ],
+        [
+            "Technique",
+            "Anticipation",
+            "Composure",
+            "Concentration",
+            "Off the Ball",
+            "Positioning",
+            "Vision",
+            "Work Rate",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "advanced_playmaker",
+        "Advanced Playmaker",
+        "AP",
+        131_072,
+        ["MC", "AMC"],
+        [
+            "First Touch",
+            "Passing",
+            "Technique",
+            "Composure",
+            "Decisions",
+            "Off the Ball",
+            "Teamwork",
+            "Vision"
+        ],
+        [
+            "Crossing",
+            "Dribbling",
+            "Anticipation",
+            "Flair",
+            "Acceleration",
+            "Agility"
+        ]
+    ),
+    ip_role!(
+        "midfield_playmaker",
+        "Midfield Playmaker",
+        "MP",
+        144_115_188_075_855_872,
+        ["MC"],
+        [
+            "First Touch",
+            "Passing",
+            "Technique",
+            "Composure",
+            "Decisions",
+            "Off the Ball",
+            "Teamwork",
+            "Vision"
+        ],
+        [
+            "Dribbling",
+            "Tackling",
+            "Anticipation",
+            "Flair",
+            "Positioning",
+            "Work Rate",
+            "Agility",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "wide_central_midfielder",
+        "Wide Central Midfielder",
+        "WCM",
+        281_474_976_710_656,
+        ["MC"],
+        [
+            "First Touch",
+            "Passing",
+            "Tackling",
+            "Decisions",
+            "Teamwork"
+        ],
+        [
+            "Crossing",
+            "Dribbling",
+            "Technique",
+            "Anticipation",
+            "Composure",
+            "Concentration",
+            "Off the Ball",
+            "Positioning",
+            "Vision",
+            "Work Rate",
+            "Agility",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "wide_midfielder",
+        "Wide Midfielder",
+        "WM",
+        64,
+        ["ML", "MR"],
+        [
+            "Crossing",
+            "Passing",
+            "Technique",
+            "Teamwork",
+            "Work Rate",
+            "Pace",
+            "Stamina"
+        ],
+        [
+            "Dribbling",
+            "First Touch",
+            "Anticipation",
+            "Composure",
+            "Off the Ball",
+            "Vision",
+            "Acceleration",
+            "Agility"
+        ]
+    ),
+    ip_role!(
+        "inside_winger",
+        "Inside Winger",
+        "IW",
+        562_949_953_421_312,
+        ["ML", "MR", "AML", "AMR"],
+        [
+            "Dribbling",
+            "First Touch",
+            "Technique",
+            "Composure",
+            "Teamwork",
+            "Acceleration",
+            "Agility"
+        ],
+        [
+            "Crossing",
+            "Long Shots",
+            "Passing",
+            "Anticipation",
+            "Flair",
+            "Off the Ball",
+            "Vision",
+            "Work Rate",
+            "Balance",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "playmaking_winger",
+        "Playmaking Winger",
+        "PW",
+        8_796_093_022_208,
+        ["ML", "MR", "AML", "AMR"],
+        [
+            "Crossing",
+            "Dribbling",
+            "First Touch",
+            "Passing",
+            "Technique",
+            "Composure",
+            "Decisions",
+            "Off the Ball",
+            "Teamwork",
+            "Vision",
+            "Acceleration"
+        ],
+        [
+            "Anticipation",
+            "Flair",
+            "Work Rate",
+            "Agility",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "winger",
+        "Winger",
+        "W",
+        128,
+        ["ML", "MR", "AML", "AMR"],
+        [
+            "Crossing",
+            "Dribbling",
+            "Technique",
+            "Teamwork",
+            "Acceleration",
+            "Agility",
+            "Pace"
+        ],
+        [
+            "First Touch",
+            "Passing",
+            "Anticipation",
+            "Flair",
+            "Off the Ball",
+            "Work Rate",
+            "Balance",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "attacking_midfielder",
+        "Attacking Midfielder",
+        "AM",
+        512,
+        ["AMC"],
+        [
+            "First Touch",
+            "Long Shots",
+            "Passing",
+            "Technique",
+            "Composure",
+            "Flair",
+            "Off the Ball"
+        ],
+        [
+            "Crossing",
+            "Dribbling",
+            "Finishing",
+            "Anticipation",
+            "Decisions",
+            "Vision",
+            "Acceleration",
+            "Agility"
+        ]
+    ),
+    ip_role!(
+        "channel_midfielder",
+        "Channel Midfielder",
+        "CHM",
+        72_057_594_037_927_936,
+        ["AMC", "MC"],
+        [
+            "Crossing",
+            "First Touch",
+            "Passing",
+            "Technique",
+            "Composure",
+            "Off the Ball",
+            "Work Rate",
+            "Acceleration"
+        ],
+        [
+            "Dribbling",
+            "Long Shots",
+            "Anticipation",
+            "Decisions",
+            "Flair",
+            "Vision",
+            "Agility",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "free_role",
+        "Free Role",
+        "FR",
+        4_294_967_296,
+        ["AMC"],
+        [
+            "Dribbling",
+            "First Touch",
+            "Long Shots",
+            "Passing",
+            "Technique",
+            "Composure",
+            "Flair",
+            "Off the Ball",
+            "Vision"
+        ],
+        [
+            "Crossing",
+            "Finishing",
+            "Anticipation",
+            "Decisions",
+            "Acceleration",
+            "Agility"
+        ]
+    ),
+    ip_role!(
+        "second_striker",
+        "Second Striker",
+        "SS",
+        2_199_023_255_552,
+        ["AMC"],
+        [
+            "Finishing",
+            "First Touch",
+            "Anticipation",
+            "Composure",
+            "Off the Ball",
+            "Acceleration"
+        ],
+        [
+            "Dribbling",
+            "Long Shots",
+            "Passing",
+            "Technique",
+            "Concentration",
+            "Decisions",
+            "Work Rate",
+            "Agility",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "wide_forward",
+        "Wide Forward",
+        "WF",
+        35_184_372_088_832,
+        ["AML", "AMR"],
+        [
+            "Dribbling",
+            "First Touch",
+            "Technique",
+            "Anticipation",
+            "Off the Ball",
+            "Acceleration",
+            "Agility",
+            "Pace"
+        ],
+        [
+            "Crossing",
+            "Finishing",
+            "Passing",
+            "Composure",
+            "Flair",
+            "Work Rate",
+            "Balance",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "inside_forward",
+        "Inside Forward",
+        "IF",
+        134_217_728,
+        ["AML", "AMR"],
+        [
+            "Dribbling",
+            "First Touch",
+            "Technique",
+            "Anticipation",
+            "Composure",
+            "Off the Ball",
+            "Acceleration",
+            "Agility"
+        ],
+        [
+            "Crossing",
+            "Finishing",
+            "Long Shots",
+            "Passing",
+            "Flair",
+            "Vision",
+            "Work Rate",
+            "Balance",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "centre_forward",
+        "Centre Forward",
+        "CF",
+        2_048,
+        ["ST"],
+        [
+            "Finishing",
+            "First Touch",
+            "Heading",
+            "Technique",
+            "Composure",
+            "Off the Ball",
+            "Acceleration",
+            "Strength"
+        ],
+        [
+            "Dribbling",
+            "Passing",
+            "Anticipation",
+            "Decisions",
+            "Agility",
+            "Balance",
+            "Jumping Reach",
+            "Pace"
+        ]
+    ),
+    ip_role!(
+        "channel_forward",
+        "Channel Forward",
+        "CHF",
+        2_147_483_648,
+        ["ST"],
+        [
+            "Dribbling",
+            "Finishing",
+            "First Touch",
+            "Technique",
+            "Composure",
+            "Off the Ball",
+            "Work Rate",
+            "Acceleration"
+        ],
+        [
+            "Crossing",
+            "Heading",
+            "Passing",
+            "Anticipation",
+            "Decisions",
+            "Agility",
+            "Balance",
+            "Pace",
+            "Stamina"
+        ]
+    ),
+    ip_role!(
+        "deep_lying_forward",
+        "Deep-Lying Forward",
+        "DLF",
+        1_024,
+        ["ST"],
+        [
+            "Finishing",
+            "First Touch",
+            "Technique",
+            "Composure",
+            "Off the Ball",
+            "Strength"
+        ],
+        [
+            "Dribbling",
+            "Passing",
+            "Anticipation",
+            "Decisions",
+            "Teamwork",
+            "Vision",
+            "Balance"
+        ]
+    ),
+    ip_role!(
+        "false_nine",
+        "False Nine",
+        "F9",
+        1_099_511_627_776,
+        ["ST"],
+        [
+            "Dribbling",
+            "First Touch",
+            "Passing",
+            "Technique",
+            "Composure",
+            "Decisions",
+            "Off the Ball",
+            "Teamwork",
+            "Vision",
+            "Acceleration"
+        ],
+        ["Finishing", "Anticipation", "Flair", "Agility", "Balance"]
+    ),
+    ip_role!(
+        "poacher",
+        "Poacher",
+        "P",
+        524_288,
+        ["ST"],
+        [
+            "Finishing",
+            "Heading",
+            "Anticipation",
+            "Composure",
+            "Concentration",
+            "Off the Ball",
+            "Acceleration"
+        ],
+        ["First Touch", "Technique", "Decisions", "Balance"]
+    ),
+    ip_role!(
+        "target_forward",
+        "Target Forward",
+        "TF",
+        262_144,
+        ["ST"],
+        [
+            "Finishing",
+            "Heading",
+            "Aggression",
+            "Bravery",
+            "Composure",
+            "Off the Ball",
+            "Balance",
+            "Jumping Reach",
+            "Strength"
+        ],
+        ["First Touch", "Anticipation", "Decisions", "Teamwork"]
+    ),
 ];
 
 pub(crate) const DUTY_DEFINITIONS: &[DutyDefinition] = &[];
 
 pub(crate) const OUT_OF_POSSESSION_ROLE_DEFINITIONS: &[OutOfPossessionRoleDefinition] = &[
-    oop_role!("line_holding_keeper", "Line-Holding Keeper", "LHK", 1, ["GK"], ["Positioning", "Concentration"], []),
-    oop_role!("sweeper_keeper", "Sweeper Keeper", "SK", 2, ["GK"], ["Rushing Out", "Anticipation", "Decisions"], []),
-    oop_role!("covering_centre_back", "Covering Centre-Back", "CCB", 4, ["DC"], ["Anticipation", "Pace", "Marking"], []),
-    oop_role!("stopping_centre_back", "Stopping Centre-Back", "SCB", 8, ["DC"], ["Aggression", "Tackling", "Strength"], []),
-    oop_role!("covering_wide_centre_back", "Covering Wide Centre-Back", "CWCB", 16, ["DC"], ["Anticipation", "Pace", "Marking"], []),
-    oop_role!("stopping_wide_centre_back", "Stopping Wide Centre-Back", "SWCB", 32, ["DC"], ["Aggression", "Tackling", "Strength"], []),
-    oop_role!("holding_full_back", "Holding Full-Back", "HFB", 64, ["DL", "DR"], ["Positioning", "Concentration", "Marking"], []),
-    oop_role!("pressing_full_back", "Pressing Full-Back", "PFB", 128, ["DL", "DR"], ["Aggression", "Work Rate", "Anticipation"], []),
-    oop_role!("holding_wing_back", "Holding Wing-Back", "HWB", 256, ["DL", "DR", "WBL", "WBR"], ["Positioning", "Concentration", "Marking"], []),
-    oop_role!("pressing_wing_back", "Pressing Wing-Back", "PWB", 512, ["DL", "DR", "WBL", "WBR"], ["Aggression", "Work Rate", "Anticipation"], []),
-    oop_role!("dropping_defensive_midfielder", "Dropping Defensive Midfielder", "DDM", 1_024, ["DM"], ["Positioning", "Decisions", "Anticipation"], []),
-    oop_role!("pressing_defensive_midfielder", "Pressing Defensive Midfielder", "PDM", 2_048, ["DM"], ["Aggression", "Work Rate", "Anticipation"], []),
-    oop_role!("screening_defensive_midfielder", "Screening Defensive Midfielder", "SDM", 4_096, ["DM"], ["Positioning", "Concentration", "Marking"], []),
-    oop_role!("wide_covering_defensive_midfielder", "Wide Covering Defensive Midfielder", "WCDM", 8_192, ["DM"], ["Anticipation", "Pace", "Work Rate"], []),
-    oop_role!("pressing_central_midfielder", "Pressing Central Midfielder", "PCM", 16_384, ["MC"], ["Aggression", "Work Rate", "Anticipation"], []),
-    oop_role!("screening_central_midfielder", "Screening Central Midfielder", "SCM", 32_768, ["MC"], ["Positioning", "Concentration", "Marking"], []),
-    oop_role!("wide_covering_central_midfielder", "Wide Covering Central Midfielder", "WCCM", 65_536, ["MC"], ["Anticipation", "Pace", "Work Rate"], []),
-    oop_role!("tracking_wide_midfielder", "Tracking Wide Midfielder", "TWM", 131_072, ["ML", "MR"], ["Marking", "Work Rate", "Stamina"], []),
-    oop_role!("wide_outlet_wide_midfielder", "Wide Outlet Wide Midfielder", "WOWM", 262_144, ["ML", "MR"], ["Off the Ball", "Pace", "Anticipation"], []),
-    oop_role!("tracking_winger", "Tracking Winger", "TW", 524_288, ["ML", "MR", "AML", "AMR"], ["Marking", "Work Rate", "Stamina"], []),
-    oop_role!("wide_outlet_winger", "Wide Outlet Winger", "WOW", 1_048_576, ["ML", "MR", "AML", "AMR"], ["Off the Ball", "Pace", "Anticipation"], []),
-    oop_role!("inside_outlet_winger", "Inside Outlet Winger", "IOW", 2_097_152, ["ML", "MR", "AML", "AMR"], ["Off the Ball", "Decisions", "Anticipation"], []),
-    oop_role!("central_outlet_attacking_midfielder", "Central Outlet Attacking Midfielder", "COAM", 4_194_304, ["AMC"], ["Off the Ball", "Decisions", "Anticipation"], []),
-    oop_role!("splitting_outlet_attacking_midfielder", "Splitting Outlet Attacking Midfielder", "SOAM", 8_388_608, ["AMC"], ["Off the Ball", "Pace", "Anticipation"], []),
-    oop_role!("tracking_attacking_midfielder", "Tracking Attacking Midfielder", "TAM", 16_777_216, ["AMC"], ["Marking", "Work Rate", "Stamina"], []),
-    oop_role!("central_outlet_centre_forward", "Central Outlet Centre Forward", "COCF", 33_554_432, ["ST"], ["Off the Ball", "Decisions", "Anticipation"], []),
-    oop_role!("splitting_outlet_centre_forward", "Splitting Outlet Centre Forward", "SOCF", 67_108_864, ["ST"], ["Off the Ball", "Pace", "Anticipation"], []),
-    oop_role!("tracking_centre_forward", "Tracking Centre Forward", "TCF", 134_217_728, ["ST"], ["Marking", "Work Rate", "Stamina"], []),
+    oop_role!(
+        "line_holding_keeper",
+        "Line-Holding Keeper",
+        "LHK",
+        1,
+        ["GK"],
+        ["Positioning", "Concentration"],
+        []
+    ),
+    oop_role!(
+        "sweeper_keeper",
+        "Sweeper Keeper",
+        "SK",
+        2,
+        ["GK"],
+        ["Rushing Out", "Anticipation", "Decisions"],
+        []
+    ),
+    oop_role!(
+        "covering_centre_back",
+        "Covering Centre-Back",
+        "CCB",
+        4,
+        ["DC"],
+        ["Anticipation", "Pace", "Marking"],
+        []
+    ),
+    oop_role!(
+        "stopping_centre_back",
+        "Stopping Centre-Back",
+        "SCB",
+        8,
+        ["DC"],
+        ["Aggression", "Tackling", "Strength"],
+        []
+    ),
+    oop_role!(
+        "covering_wide_centre_back",
+        "Covering Wide Centre-Back",
+        "CWCB",
+        16,
+        ["DC"],
+        ["Anticipation", "Pace", "Marking"],
+        []
+    ),
+    oop_role!(
+        "stopping_wide_centre_back",
+        "Stopping Wide Centre-Back",
+        "SWCB",
+        32,
+        ["DC"],
+        ["Aggression", "Tackling", "Strength"],
+        []
+    ),
+    oop_role!(
+        "holding_full_back",
+        "Holding Full-Back",
+        "HFB",
+        64,
+        ["DL", "DR"],
+        ["Positioning", "Concentration", "Marking"],
+        []
+    ),
+    oop_role!(
+        "pressing_full_back",
+        "Pressing Full-Back",
+        "PFB",
+        128,
+        ["DL", "DR"],
+        ["Aggression", "Work Rate", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "holding_wing_back",
+        "Holding Wing-Back",
+        "HWB",
+        256,
+        ["DL", "DR", "WBL", "WBR"],
+        ["Positioning", "Concentration", "Marking"],
+        []
+    ),
+    oop_role!(
+        "pressing_wing_back",
+        "Pressing Wing-Back",
+        "PWB",
+        512,
+        ["DL", "DR", "WBL", "WBR"],
+        ["Aggression", "Work Rate", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "dropping_defensive_midfielder",
+        "Dropping Defensive Midfielder",
+        "DDM",
+        1_024,
+        ["DM"],
+        ["Positioning", "Decisions", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "pressing_defensive_midfielder",
+        "Pressing Defensive Midfielder",
+        "PDM",
+        2_048,
+        ["DM"],
+        ["Aggression", "Work Rate", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "screening_defensive_midfielder",
+        "Screening Defensive Midfielder",
+        "SDM",
+        4_096,
+        ["DM"],
+        ["Positioning", "Concentration", "Marking"],
+        []
+    ),
+    oop_role!(
+        "wide_covering_defensive_midfielder",
+        "Wide Covering Defensive Midfielder",
+        "WCDM",
+        8_192,
+        ["DM"],
+        ["Anticipation", "Pace", "Work Rate"],
+        []
+    ),
+    oop_role!(
+        "pressing_central_midfielder",
+        "Pressing Central Midfielder",
+        "PCM",
+        16_384,
+        ["MC"],
+        ["Aggression", "Work Rate", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "screening_central_midfielder",
+        "Screening Central Midfielder",
+        "SCM",
+        32_768,
+        ["MC"],
+        ["Positioning", "Concentration", "Marking"],
+        []
+    ),
+    oop_role!(
+        "wide_covering_central_midfielder",
+        "Wide Covering Central Midfielder",
+        "WCCM",
+        65_536,
+        ["MC"],
+        ["Anticipation", "Pace", "Work Rate"],
+        []
+    ),
+    oop_role!(
+        "tracking_wide_midfielder",
+        "Tracking Wide Midfielder",
+        "TWM",
+        131_072,
+        ["ML", "MR"],
+        ["Marking", "Work Rate", "Stamina"],
+        []
+    ),
+    oop_role!(
+        "wide_outlet_wide_midfielder",
+        "Wide Outlet Wide Midfielder",
+        "WOWM",
+        262_144,
+        ["ML", "MR"],
+        ["Off the Ball", "Pace", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "tracking_winger",
+        "Tracking Winger",
+        "TW",
+        524_288,
+        ["ML", "MR", "AML", "AMR"],
+        ["Marking", "Work Rate", "Stamina"],
+        []
+    ),
+    oop_role!(
+        "wide_outlet_winger",
+        "Wide Outlet Winger",
+        "WOW",
+        1_048_576,
+        ["ML", "MR", "AML", "AMR"],
+        ["Off the Ball", "Pace", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "inside_outlet_winger",
+        "Inside Outlet Winger",
+        "IOW",
+        2_097_152,
+        ["ML", "MR", "AML", "AMR"],
+        ["Off the Ball", "Decisions", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "central_outlet_attacking_midfielder",
+        "Central Outlet Attacking Midfielder",
+        "COAM",
+        4_194_304,
+        ["AMC"],
+        ["Off the Ball", "Decisions", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "splitting_outlet_attacking_midfielder",
+        "Splitting Outlet Attacking Midfielder",
+        "SOAM",
+        8_388_608,
+        ["AMC"],
+        ["Off the Ball", "Pace", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "tracking_attacking_midfielder",
+        "Tracking Attacking Midfielder",
+        "TAM",
+        16_777_216,
+        ["AMC"],
+        ["Marking", "Work Rate", "Stamina"],
+        []
+    ),
+    oop_role!(
+        "central_outlet_centre_forward",
+        "Central Outlet Centre Forward",
+        "COCF",
+        33_554_432,
+        ["ST"],
+        ["Off the Ball", "Decisions", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "splitting_outlet_centre_forward",
+        "Splitting Outlet Centre Forward",
+        "SOCF",
+        67_108_864,
+        ["ST"],
+        ["Off the Ball", "Pace", "Anticipation"],
+        []
+    ),
+    oop_role!(
+        "tracking_centre_forward",
+        "Tracking Centre Forward",
+        "TCF",
+        134_217_728,
+        ["ST"],
+        ["Marking", "Work Rate", "Stamina"],
+        []
+    ),
 ];
 
 pub(crate) fn evaluate_player_roles(
@@ -314,9 +1555,19 @@ fn score_in_possession_role(
     if position_fit < 5 {
         return None;
     }
-    let attribute_fit = weighted_attribute_fit(role.primary_attributes, role.secondary_attributes, attributes);
+    let attribute_fit = weighted_attribute_fit(
+        role.primary_attributes,
+        role.secondary_attributes,
+        attributes,
+    );
     let score = phase_score(position_fit, attribute_fit);
-    let mut evidence = role_evidence(role.primary_attributes, role.secondary_attributes, attributes, top_position, top_familiarity);
+    let mut evidence = role_evidence(
+        role.primary_attributes,
+        role.secondary_attributes,
+        attributes,
+        top_position,
+        top_familiarity,
+    );
     evidence.insert(0, "In possession role model".to_string());
     Some(PlayerRoleFit {
         role_key: role.key.to_string(),
@@ -333,7 +1584,12 @@ fn score_in_possession_role(
         out_of_possession_role: None,
         in_possession_fit: Some(score),
         out_of_possession_fit: None,
-        red_flags: role_red_flags(role.label, role.primary_attributes, role.secondary_attributes, attributes),
+        red_flags: role_red_flags(
+            role.label,
+            role.primary_attributes,
+            role.secondary_attributes,
+            attributes,
+        ),
     })
 }
 
@@ -347,9 +1603,19 @@ fn score_out_of_possession_role(
     if position_fit < 5 {
         return None;
     }
-    let attribute_fit = weighted_attribute_fit(role.primary_attributes, role.secondary_attributes, attributes);
+    let attribute_fit = weighted_attribute_fit(
+        role.primary_attributes,
+        role.secondary_attributes,
+        attributes,
+    );
     let score = phase_score(position_fit, attribute_fit);
-    let mut evidence = role_evidence(role.primary_attributes, role.secondary_attributes, attributes, top_position, top_familiarity);
+    let mut evidence = role_evidence(
+        role.primary_attributes,
+        role.secondary_attributes,
+        attributes,
+        top_position,
+        top_familiarity,
+    );
     evidence.insert(0, "Out of possession role model".to_string());
     Some(PlayerRoleFit {
         role_key: role.key.to_string(),
@@ -366,7 +1632,12 @@ fn score_out_of_possession_role(
         out_of_possession_role: Some(role.label),
         in_possession_fit: None,
         out_of_possession_fit: Some(score),
-        red_flags: role_red_flags(role.label, role.primary_attributes, role.secondary_attributes, attributes),
+        red_flags: role_red_flags(
+            role.label,
+            role.primary_attributes,
+            role.secondary_attributes,
+            attributes,
+        ),
     })
 }
 
@@ -384,7 +1655,8 @@ fn combine_phase_roles(
             let score = ((f32::from(ip.score) * 0.60) + (f32::from(oop.score) * 0.40))
                 .round()
                 .clamp(0.0, 100.0) as u8;
-            let position_fit = ((u16::from(ip.position_fit) + u16::from(oop.position_fit)) / 2) as u8;
+            let position_fit =
+                ((u16::from(ip.position_fit) + u16::from(oop.position_fit)) / 2) as u8;
             let attribute_fit = match (ip.attribute_fit, oop.attribute_fit) {
                 (Some(left), Some(right)) => Some(((u16::from(left) + u16::from(right)) / 2) as u8),
                 (Some(value), None) | (None, Some(value)) => Some(value),
@@ -429,8 +1701,7 @@ fn combine_phase_roles(
 fn phase_score(position_fit: u8, attribute_fit: Option<u8>) -> u8 {
     match attribute_fit {
         Some(attribute_fit) => {
-            (f32::from(position_fit) * 0.34 + f32::from(attribute_fit) * 0.66)
-                .round() as u8
+            (f32::from(position_fit) * 0.34 + f32::from(attribute_fit) * 0.66).round() as u8
         }
         None => position_fit,
     }
@@ -541,7 +1812,10 @@ fn role_red_flags(
             .iter()
             .any(|attribute| weak(attribute))
     {
-        flags.push("Pressing fraud: pressing role has weak aggression, work rate or anticipation.".to_string());
+        flags.push(
+            "Pressing fraud: pressing role has weak aggression, work rate or anticipation."
+                .to_string(),
+        );
     }
     if label.contains("Covering")
         && ["Pace", "Anticipation"]
@@ -558,23 +1832,30 @@ fn role_red_flags(
             .iter()
             .any(|attribute| weak(attribute))
     {
-        flags.push("Creative fraud: creative role has weak passing, decisions, vision or technique.".to_string());
+        flags.push(
+            "Creative fraud: creative role has weak passing, decisions, vision or technique."
+                .to_string(),
+        );
     }
     if (label.contains("Centre-Back") || label.contains("Target"))
         && ["Strength", "Jumping Reach", "Heading"]
             .iter()
             .any(|attribute| weak(attribute))
     {
-        flags.push("Physical mismatch: aerial/physical role has weak strength, jumping or heading.".to_string());
+        flags.push(
+            "Physical mismatch: aerial/physical role has weak strength, jumping or heading."
+                .to_string(),
+        );
     }
-    if ["Marking", "Work Rate", "Stamina"]
+    if ["Marking", "Work Rate", "Stamina"].iter().all(|attribute| {
+        primary_attributes.contains(attribute) || secondary_attributes.contains(attribute)
+    }) && ["Marking", "Work Rate", "Stamina"]
         .iter()
-        .all(|attribute| primary_attributes.contains(attribute) || secondary_attributes.contains(attribute))
-        && ["Marking", "Work Rate", "Stamina"]
-            .iter()
-            .any(|attribute| weak(attribute))
+        .any(|attribute| weak(attribute))
     {
-        flags.push("Bad defensive match: tracking role lacks marking, work rate or stamina.".to_string());
+        flags.push(
+            "Bad defensive match: tracking role lacks marking, work rate or stamina.".to_string(),
+        );
     }
     if any_weak_primary {
         flags.push("Weak VI attribute: one or more very important role attributes are below the safe threshold.".to_string());
@@ -605,7 +1886,10 @@ fn combined_red_flags(
     flags
 }
 
-fn phase_positions_compatible(left: &'static [&'static str], right: &'static [&'static str]) -> bool {
+fn phase_positions_compatible(
+    left: &'static [&'static str],
+    right: &'static [&'static str],
+) -> bool {
     left.iter().any(|left_position| {
         right.iter().any(|right_position| {
             canonical_slot(left_position) == canonical_slot(right_position)
@@ -681,7 +1965,8 @@ mod tests {
 
     #[test]
     fn fm26_role_catalogue_is_phase_split_without_legacy_duties() {
-        assert!(role_definition_for_mask(16_777_216).is_some_and(|role| role.label == "Ball-Playing Centre-Back"));
+        assert!(role_definition_for_mask(16_777_216)
+            .is_some_and(|role| role.label == "Ball-Playing Centre-Back"));
         assert_eq!(DUTY_DEFINITIONS.len(), 0);
         assert!(duty_definition_for_mask(4_194_304).is_none());
         assert!(OUT_OF_POSSESSION_ROLE_DEFINITIONS.len() >= 28);

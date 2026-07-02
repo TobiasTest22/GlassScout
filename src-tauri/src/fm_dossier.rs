@@ -725,7 +725,10 @@ fn merge_player(player: &mut Value, dossier: &DossierPlayer) {
         "notForSale".to_string(),
         json!(dossier.not_for_sale.map(|value| value == 1)),
     );
-    object.insert("transferInterest".to_string(), json!(Option::<String>::None));
+    object.insert(
+        "transferInterest".to_string(),
+        json!(Option::<String>::None),
+    );
     object.insert("loanInterest".to_string(), json!(Option::<String>::None));
     object.insert("clubName".to_string(), json!(dossier.club_name));
     object.insert(
