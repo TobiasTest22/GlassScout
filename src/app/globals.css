@@ -1898,3 +1898,138 @@ html,body{
 .global-search-results{
   top:82px;
 }
+
+/* 0.1.15 — compact unified sticky header shell */
+.app-canvas,
+.app-canvas:has(.scout-room-reference){
+  grid-template-rows:112px minmax(0,1fr);
+}
+.app-top-shell{
+  position:fixed;
+  top:0;
+  left:0;
+  right:0;
+  z-index:60;
+  grid-row:1;
+  grid-column:1;
+  display:grid;
+  grid-template-rows:56px 56px;
+  min-width:0;
+  background:rgba(251,253,253,.97);
+  border-bottom:1px solid rgba(211,224,234,.72);
+  box-shadow:0 10px 34px rgba(16,40,65,.05);
+  backdrop-filter:blur(18px);
+}
+.app-top-shell .app-sidebar,
+.app-canvas:has(.scout-room-reference) .app-top-shell .app-sidebar{
+  position:relative;
+  top:auto;
+  z-index:2;
+  grid-row:1;
+  height:56px;
+  padding:0 28px;
+  background:transparent;
+  backdrop-filter:none;
+}
+.app-top-shell .topbar,
+.app-top-shell .topbar-dashboard{
+  position:relative;
+  top:auto;
+  z-index:1;
+  grid-row:2;
+  height:56px;
+  padding:0 28px;
+  grid-template-columns:minmax(238px,330px) minmax(420px,680px) minmax(260px,1fr);
+  gap:18px;
+  background:transparent;
+  backdrop-filter:none;
+}
+.app-main{
+  grid-row:2;
+}
+.app-top-shell .brand-mark,
+.app-canvas:has(.scout-room-reference) .app-top-shell .brand-mark{
+  width:31px;
+  height:31px;
+}
+.app-top-shell .brand-mark:before,
+.app-canvas:has(.scout-room-reference) .app-top-shell .brand-mark:before{width:40px}
+.app-top-shell .brand-mark:after,
+.app-canvas:has(.scout-room-reference) .app-top-shell .brand-mark:after{height:40px}
+.app-top-shell .brand-copy strong{font-size:14px}
+.app-top-shell .brand-copy small{font-size:10px}
+.app-top-shell .nav-item,
+.app-canvas:has(.scout-room-reference) .app-top-shell .nav-item{
+  height:34px;
+  padding:0 12px;
+  border-radius:9px;
+  font-size:11px;
+}
+.app-top-shell .nav-item svg,
+.app-canvas:has(.scout-room-reference) .app-top-shell .nav-item svg{
+  width:16px;
+  height:16px;
+}
+.app-top-shell .sidebar-footer strong{font-size:10px}
+.app-top-shell .sidebar-footer small{font-size:8px}
+.app-top-shell .topbar-left-cluster{
+  gap:12px;
+}
+.app-top-shell .topbar-history-controls{
+  height:34px;
+  border-radius:10px;
+}
+.app-top-shell .topbar-history-controls button{
+  width:27px;
+  height:27px;
+}
+.app-top-shell .screen-context,
+.app-top-shell .dashboard-greeting{
+  gap:3px;
+}
+.app-top-shell .screen-context strong,
+.app-top-shell .dashboard-greeting strong{
+  font-size:14px;
+}
+.app-top-shell .screen-context span,
+.app-top-shell .dashboard-greeting span{
+  font-size:11px;
+}
+.app-top-shell .search-wrap,
+.app-top-shell .topbar-dashboard .search-wrap{
+  height:40px;
+}
+.app-top-shell .search-wrap input,
+.app-top-shell .topbar-dashboard .search-wrap input{
+  height:40px;
+  padding-left:44px;
+  border-radius:10px;
+}
+.app-top-shell .search-wrap>svg{
+  width:16px;
+}
+.app-top-shell .keyboard-hint{
+  padding:4px 7px;
+}
+.app-top-shell .sync-badge{
+  height:36px;
+  padding-inline:12px;
+}
+.app-top-shell .topbar-actions{
+  gap:10px;
+}
+.app-top-shell .topbar-actions>button{
+  width:36px;
+  height:36px;
+}
+.app-top-shell .global-search-results{
+  position:absolute;
+  top:102px;
+  left:50%;
+}
+.screen-slot{
+  min-height:calc(100vh - 112px);
+}
+.screen{
+  padding-top:16px;
+}

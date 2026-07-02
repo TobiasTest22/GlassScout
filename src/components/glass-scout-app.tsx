@@ -268,8 +268,8 @@ export function GlassScoutApp() {
   return (
     <TooltipProvider>
       <div className="app-canvas">
-        <AppSidebar screen={screen} onNavigate={navigate} />
-        <section className="app-main">
+        <div className="app-top-shell">
+          <AppSidebar screen={screen} onNavigate={navigate} />
           <Topbar
             search={search}
             onSearch={setSearch}
@@ -302,6 +302,8 @@ export function GlassScoutApp() {
               {!globalClubs.length && !globalIndexed.length ? <p>No indexed player or mapped team matches “{search}”.</p> : null}
             </motion.div>
           ) : null}
+        </div>
+        <section className="app-main">
           <AnimatePresence mode="wait">
             <div key={screen} className="screen-slot">{content}</div>
           </AnimatePresence>
