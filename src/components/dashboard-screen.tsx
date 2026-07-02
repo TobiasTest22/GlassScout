@@ -98,9 +98,9 @@ export function DashboardScreen({
     {
       icon: ShieldCheck,
       title: `${squad.length} managed-club players visibility-safe`,
-      detail: "Names and positions are live; unsupported fields remain Unknown.",
+      detail: "IDs, ages, nations, positions, feet and visible attributes are live; unsupported fields remain Unknown.",
       action: "Open squad",
-      screen: "Squad Planner" as Screen,
+      screen: "Squad" as Screen,
     },
   ];
 
@@ -110,7 +110,7 @@ export function DashboardScreen({
         <TacticalBoard snapshot={snapshot} compact />
 
         <section className="command-panel recruitment-pulse">
-          <header><h2>Recruitment pulse</h2><span>{externalVisible.length} live targets</span></header>
+          <header><h2>Scout Room pulse</h2><span>{externalVisible.length} live targets</span></header>
           <div className="recruitment-pulse-empty">
             <span className="target-avatar"><SearchCheck /></span>
             <div>
@@ -122,7 +122,7 @@ export function DashboardScreen({
               </p>
             </div>
           </div>
-          <Button variant="outline" onClick={() => onNavigate("Recruitment")}>
+          <Button variant="outline" onClick={() => onNavigate("Scout Room")}>
             <SearchCheck data-icon="inline-start" />Plan recruitment
           </Button>
         </section>

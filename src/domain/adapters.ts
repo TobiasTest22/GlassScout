@@ -53,11 +53,14 @@ export type LivePlayer = {
   id: string;
   name: string;
   age: number | null;
+  dateOfBirth?: string | null;
   nationality: string | null;
+  secondNationality?: string | null;
   positions: string[];
   bestRole: string | null;
   currentAbility: number | null;
   potentialAbility: number | null;
+  abilityScore?: number | null;
   form: string | null;
   averageRating: number | null;
   minutesPlayed: number | null;
@@ -70,6 +73,7 @@ export type LivePlayer = {
   developmentTrend: "improving" | "stable" | "declining" | null;
   tacticalFit: number | null;
   roleFit: number | null;
+  preferredFoot?: string | null;
   strengths: string[];
   weaknesses: string[];
   clubId: string | null;
@@ -80,6 +84,9 @@ export type LivePlayer = {
   attributes?: Record<string, number | null>;
   per90?: Record<string, number | null>;
   scoutKnowledge?: "fully_known" | "partly_known" | "unknown" | "needs_scouting" | "missing_data";
+  scoutConfidence?: number | null;
+  lastScoutedDate?: string | null;
+  reportReliability?: string | null;
   bestCalculatedPosition?: string | null;
   truePrice?: number | null;
   fairPriceRange?: [number, number] | null;
@@ -133,6 +140,7 @@ export type TacticFileResult = {
   parsedRoles: string[];
   parsedDuties: string[];
   detectedFormat: string | null;
+  archiveEntries?: string[];
   compressed: boolean | null;
   encoded: boolean | null;
   warnings: string[];
@@ -155,6 +163,7 @@ export type LiveFootballSnapshot = {
   tacticImportedAt?: string | null;
   tacticFileErrors?: string[];
   tacticDetectedFormat?: string | null;
+  tacticArchiveEntries?: string[];
   dataError: string | null;
   dataSource?: "none" | "live-memory";
   dataWarnings?: string[];
@@ -255,6 +264,7 @@ export function mergeTacticFile(
     tacticImportedAt: file.importedAt,
     tacticFileErrors: file.errors,
     tacticDetectedFormat: file.detectedFormat,
+    tacticArchiveEntries: file.archiveEntries ?? [],
   };
 }
 

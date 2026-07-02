@@ -58,6 +58,7 @@ export function TacticsScreen({
               <div><dt>Formation</dt><dd>{snapshot.tactic?.formation ?? "Unknown"}</dd></div>
               <div><dt>Imported</dt><dd>{formatImportDate(snapshot.tacticImportedAt)}</dd></div>
               <div><dt>Size</dt><dd>{formatFileSize(snapshot.tacticFileSize)}</dd></div>
+              <div><dt>Archive entries</dt><dd>{snapshot.tacticArchiveEntries?.join(", ") || "Unavailable"}</dd></div>
             </dl>
           </section>
           <section>

@@ -15,7 +15,7 @@ The desktop connector can currently:
 - keep every non-squad index record behind a visibility gate until club scout knowledge can be mapped safely;
 - validate signatures, object types, collection bounds and pointer chains before returning entities.
 
-Version `0.1.4` supports FM26 `6000.0.52.8888375`, product `6000.0.52f1-fm26-05f1 (87a0370e9917)`, x64, executable SHA-256 `3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73`.
+Version `0.1.5` supports FM26 `6000.0.52.8888375`, product `6000.0.52f1-fm26-05f1 (87a0370e9917)`, x64, executable SHA-256 `3653C97F9CCEC2BE28EDC4FAAE67304B5B6C26733F2F07DEA3E7C591D3B9FF73`.
 
 Live-memory tactic reading is disabled and cannot block squad/player connection. The user may choose one `.fmf` tactic file through the native Windows file picker. GlassScout validates and copies that file into local app data, then reports whether its format can be decoded. The current FM26 FMF container is recognized but not yet fully decoded, so no formation, role, duty or tactic-fit result is guessed.
 
@@ -37,7 +37,7 @@ GlassScout is live-game only. When the installed FM26 build has no verified enti
 
 ## Install the Windows test build
 
-Download [GlassScout FM26 0.1.4 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.4/GlassScout.FM26_0.1.4_x64-setup.exe).
+Download [GlassScout FM26 0.1.5 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.5/GlassScout.FM26_0.1.5_x64-setup.exe).
 
 The NSIS setup installs GlassScout locally and uses Tauri's WebView2 bootstrapper when the required Windows web runtime is missing. The prerelease is not code-signed yet, so Windows SmartScreen may ask for confirmation.
 

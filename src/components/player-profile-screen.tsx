@@ -17,11 +17,13 @@ import {
 } from "lucide-react";
 import type { LiveFootballSnapshot, LivePlayer } from "@/domain/adapters";
 import { Button } from "@/components/ui/button";
+import { ConfidenceRing } from "@/components/confidence-ring";
+import { PlayerFace } from "@/components/player-face";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const technicalAttributes = ["Technique", "Dribbling", "Passing", "First Touch", "Finishing", "Crossing", "Long Shots"];
-const mentalAttributes = ["Vision", "Decisions", "Composure", "Anticipation", "Work Rate", "Flair", "Consistency"];
-const physicalAttributes = ["Acceleration", "Pace", "Agility", "Balance", "Strength", "Stamina", "Injury Proneness"];
+const mentalAttributes = ["Vision", "Decisions", "Composure", "Anticipation", "Work Rate", "Flair", "Teamwork"];
+const physicalAttributes = ["Acceleration", "Pace", "Agility", "Balance", "Strength", "Stamina", "Natural Fitness"];
 
 function evidenceValue(player: LivePlayer, attribute: string) {
   const value = player.attributes?.[attribute];
@@ -37,10 +39,6 @@ function AttributeGroup({ title, names, player }: { title: string; names: string
       ))}
     </section>
   );
-}
-
-function UnknownRing() {
-  return <span className="unknown-confidence-ring"><strong>—</strong><small>Unknown</small></span>;
 }
 
 export function PlayerProfileScreen({
@@ -67,7 +65,7 @@ export function PlayerProfileScreen({
 
   const club = player.clubId ? snapshot.clubs.find((item) => item.id === player.clubId) : null;
   const mappedAttributeCount = Object.values(player.attributes ?? {}).filter((value) => typeof value === "number").length;
-  const knownEvidence = Math.min(100, Math.round(((2 + mappedAttributeCount) / 23) * 100));
+  const knownEvidence = player.scoutConfidence ?? Math.min(100, Math.round((mappedAttributeCount / 47) * 100));
   const unknownEvidence = 100 - knownEvidence;
 
   return (
@@ -75,6 +73,7 @@ export function PlayerProfileScreen({
       <header className="dossier-header">
         <div className="dossier-heading">
           <Button variant="ghost" size="icon" aria-label="Back to players" onClick={onBack}><ArrowLeft /></Button>
+          <PlayerFace playerId={player.id} name={player.name} size="lg" />
           <div><h1>{player.name}</h1><p>Visibility-safe live FM26 dossier</p></div>
         </div>
         <div className="dossier-actions">
@@ -87,18 +86,18 @@ export function PlayerProfileScreen({
       <section className="player-facts">
         <span><b>Nationality</b><strong>{player.nationality ?? "Unknown"}</strong></span>
         <span><b>Club</b><strong>{club?.name ?? "Unknown"}</strong></span>
-        <span><b>Age</b><strong>{player.age ?? "Unknown"}</strong></span>
+        <span><b>Age / DOB</b><strong>{player.age ?? "Unknown"}{player.dateOfBirth ? ` · ${player.dateOfBirth}` : ""}</strong></span>
         <span><b>Position</b><strong>{player.positions.join(" / ") || "Unknown"}</strong></span>
-        <span><b>Preferred foot</b><strong>Unknown</strong></span>
+        <span><b>Preferred foot</b><strong>{player.preferredFoot ?? "Unknown"}</strong></span>
         <span><b>Value</b><strong>{player.value ?? "Unknown"}</strong></span>
         <span><b>Wage</b><strong>{player.wage ?? "Unknown"}</strong></span>
         <span><b>Contract</b><strong>{player.contractStatus ?? "Unknown"}</strong></span>
-        <span className="fact-confidence"><b>Scout confidence</b><UnknownRing /></span>
+        <span className="fact-confidence"><b>Knowledge</b>{player.scoutConfidence == null ? <strong>Unknown</strong> : <ConfidenceRing value={player.scoutConfidence} size="sm" />}</span>
       </section>
 
       <Tabs defaultValue="overview" className="dossier-tabs">
         <TabsList variant="line">
-          {["overview", "tactical", "attributes", "performance", "career", "reports", "notes"].map((value) => (
+          {["overview", "tactical", "attributes", "performance", "career", "notes"].map((value) => (
             <TabsTrigger key={value} value={value}>
               {value === "tactical" ? "Tactical fit" : value[0].toUpperCase() + value.slice(1)}
             </TabsTrigger>
@@ -111,23 +110,23 @@ export function PlayerProfileScreen({
               <section className="dossier-panel scout-summary-panel">
                 <header><UserRound /><h2>Scout summary</h2></header>
                 <p>
-                  Live memory confirms <strong>{player.name}</strong> belongs to {club?.name ?? "the current club"} and is familiar with {player.positions.join(", ") || "an unknown position"}.
-                  Age, nationality, attributes, form, contract, wage and valuation are not mapped for this FM26 build, so GlassScout does not produce an ability or recruitment recommendation.
+                  Live memory confirms <strong>{player.name}</strong> ({player.nationality ?? "nationality unknown"}, age {player.age ?? "unknown"}) belongs to {club?.name ?? "the current club"}.
+                  The role evidence score uses only visible FM26 attributes for {player.bestRole ?? player.positions[0] ?? "the player’s position"}; hidden current and potential ability are never read.
                 </p>
                 <div className="summary-columns">
-                  <div><h3><CheckCircle2 />Strengths</h3><span>Unknown — no visible attribute evidence</span></div>
-                  <div><h3><AlertCircle />Weaknesses</h3><span>Unknown — no visible attribute evidence</span></div>
-                  <div><h3><ClipboardList />Recommended next action</h3><span>Collect a visibility-safe scout report before making a decision.</span></div>
+                  <div><h3><CheckCircle2 />Strengths</h3><span>{player.strengths.length ? player.strengths.join(" · ") : "No visible evidence"}</span></div>
+                  <div><h3><AlertCircle />Weaknesses</h3><span>{player.weaknesses.length ? player.weaknesses.join(" · ") : "No visible evidence"}</span></div>
+                  <div><h3><ClipboardList />Recommended next action</h3><span>{snapshot.tactic ? "Review formation-specific fit." : "Import an FMF tactic before judging tactical fit."}</span></div>
                 </div>
               </section>
 
               <section className="dossier-panel role-fit-panel">
-                <header><MapPinned /><h2>Role & tactical fit</h2></header>
+                <header><MapPinned /><h2>{snapshot.tactic ? "Role & tactical fit" : "Role evidence"}</h2></header>
                 <div className="role-fit-layout">
                   <div className="role-fit-metrics">
                     <span><small>Best role</small><strong>{player.bestRole ?? "Unknown"}</strong></span>
-                    <span><small>Fit range</small><strong>{player.roleFit == null ? "Unknown" : `${player.roleFit}%`}</strong></span>
-                    <span><small>Scout confidence</small><strong>Unknown</strong></span>
+                    <span><small>{snapshot.tactic ? "Tactical fit" : "Role evidence"}</small><strong>{player.roleFit == null ? "Unknown" : `${player.roleFit}%`}</strong></span>
+                    <span><small>Knowledge</small><strong>{player.scoutConfidence == null ? "Unknown" : `${player.scoutConfidence}%`}</strong></span>
                   </div>
                   <div className="mini-role-map">
                     <span className="mini-box left" /><span className="mini-box right" /><span className="mini-half" /><span className="mini-centre" />
@@ -164,9 +163,9 @@ export function PlayerProfileScreen({
                   </div>
                 </div>
                 <dl>
-                  <div><dt>Last scouted</dt><dd>Unknown</dd></div>
+                  <div><dt>Last scouted</dt><dd>{player.lastScoutedDate ?? "Unknown"}</dd></div>
                   <div><dt>Observations</dt><dd>Unknown</dd></div>
-                  <div><dt>Report reliability</dt><dd>Unknown</dd></div>
+                  <div><dt>Report reliability</dt><dd>{player.reportReliability ?? "Unknown"}</dd></div>
                 </dl>
               </section>
 
@@ -197,7 +196,7 @@ export function PlayerProfileScreen({
           </div>
         </TabsContent>
 
-        {["tactical", "attributes", "performance", "career", "reports", "notes"].map((value) => (
+        {["tactical", "attributes", "performance", "career", "notes"].map((value) => (
           <TabsContent value={value} key={value}>
             <section className="dossier-locked-state">
               <ShieldAlert />

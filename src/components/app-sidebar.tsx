@@ -4,14 +4,10 @@ import {
   Binoculars,
   CalendarDays,
   ChevronLeft,
-  ClipboardList,
   LayoutDashboard,
   PanelsTopLeft,
-  SearchCheck,
   Settings,
-  ShieldCheck,
   Star,
-  UserRoundSearch,
   UsersRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,25 +15,19 @@ import { cn } from "@/lib/utils";
 
 export type Screen =
   | "Dashboard"
-  | "Squad Planner"
+  | "Squad"
   | "Tactical Board"
   | "Scout Room"
-  | "Recruitment"
-  | "Players"
   | "Shortlist"
-  | "Reports"
   | "Player Profile"
   | "Settings";
 
 const navigation = [
   { label: "Dashboard", icon: LayoutDashboard },
-  { label: "Squad Planner", icon: UsersRound },
+  { label: "Squad", icon: UsersRound },
   { label: "Tactical Board", icon: PanelsTopLeft },
   { label: "Scout Room", icon: Binoculars },
-  { label: "Recruitment", icon: SearchCheck },
-  { label: "Players", icon: UserRoundSearch },
   { label: "Shortlist", icon: Star },
-  { label: "Reports", icon: ClipboardList },
 ] satisfies { label: Screen; icon: typeof LayoutDashboard }[];
 
 export function AppSidebar({
@@ -69,13 +59,6 @@ export function AppSidebar({
       </nav>
 
       <div className="sidebar-spacer" />
-      <section className="revealed-data-card">
-        <ShieldCheck />
-        <div>
-          <strong>Revealed data only</strong>
-          <span>Hidden values blocked before scoring.</span>
-        </div>
-      </section>
       <Button
         variant="ghost"
         className={cn("nav-item", screen === "Settings" && "nav-item-active")}
@@ -86,7 +69,7 @@ export function AppSidebar({
       </Button>
       <div className="sidebar-footer">
         <span className="manager-avatar">TB</span>
-        <span><strong>Recruitment desk</strong><small>Live FM26</small></span>
+        <span><strong>Scouting desk</strong><small>Live FM26</small></span>
         <CalendarDays aria-hidden="true" />
       </div>
       <button className="sidebar-collapse" aria-label="Collapse sidebar"><ChevronLeft /></button>

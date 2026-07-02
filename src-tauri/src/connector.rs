@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tauri::Emitter;
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
@@ -9,12 +8,70 @@ use std::{
     path::Path,
     sync::{OnceLock, RwLock},
 };
+use tauri::Emitter;
 
 const READ_ONLY_PROCESS_ACCESS: u32 = 0x1410;
 const MAX_STRING_BYTES: usize = 192;
-const POSITION_NAMES: [&str; 13] = [
-    "GK", "SW", "DL", "DC", "DR", "DM", "WBL", "MC", "WBR", "AML", "AMR", "AMC", "ST",
+const POSITION_NAMES: [&str; 15] = [
+    "GK", "SW", "DL", "DC", "DR", "DM", "ML", "MC", "MR", "AML", "AMC", "AMR", "ST", "WBL", "WBR",
 ];
+const PLAYER_ATTRIBUTE_NAMES: [&str; 54] = [
+    "Crossing",
+    "Dribbling",
+    "Finishing",
+    "Heading",
+    "Long Shots",
+    "Marking",
+    "Off the Ball",
+    "Passing",
+    "Penalty Taking",
+    "Tackling",
+    "Vision",
+    "Handling",
+    "Aerial Reach",
+    "Command of Area",
+    "Communication",
+    "Kicking",
+    "Throwing",
+    "Anticipation",
+    "Decisions",
+    "One on Ones",
+    "Positioning",
+    "Reflexes",
+    "First Touch",
+    "Technique",
+    "Left Foot",
+    "Right Foot",
+    "Flair",
+    "Corners",
+    "Teamwork",
+    "Work Rate",
+    "Long Throws",
+    "Eccentricity",
+    "Rushing Out",
+    "Punching",
+    "Acceleration",
+    "Free Kick Taking",
+    "Strength",
+    "Stamina",
+    "Pace",
+    "Jumping Reach",
+    "Leadership",
+    "Dirtiness",
+    "Balance",
+    "Bravery",
+    "Consistency",
+    "Aggression",
+    "Agility",
+    "Important Matches",
+    "Injury Proneness",
+    "Versatility",
+    "Natural Fitness",
+    "Determination",
+    "Composure",
+    "Concentration",
+];
+const HIDDEN_ATTRIBUTE_INDEXES: [usize; 5] = [41, 44, 47, 48, 49];
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,6 +198,11 @@ struct MapConstants {
     entity_uid_offset: u64,
     player_person_offset: u64,
     player_positions_offset: u64,
+    player_attributes_offset: u64,
+    player_current_date_offset: u64,
+    person_nationality_offset: u64,
+    nation_name_offset: u64,
+    person_birth_date_offset: u64,
 }
 
 #[derive(Default)]
@@ -155,6 +217,7 @@ struct ExtractionDiagnostics {
 struct LiveData {
     managed_club_id: String,
     manager_name: String,
+    season: Option<String>,
     clubs: Vec<Value>,
     players: Vec<Value>,
     database_players_indexed: u32,
@@ -171,6 +234,12 @@ struct IndexedPlayerRecord {
     positions: Vec<String>,
     managed_squad: bool,
     visibility_safe: bool,
+}
+
+#[derive(Clone, Copy)]
+struct FmDate {
+    year: u16,
+    day_of_year: u16,
 }
 
 #[derive(Default)]
@@ -436,7 +505,7 @@ fn collect_snapshot(
             status.database_players_indexed = data.database_players_indexed;
             status.background_players_indexed = data.background_players_indexed;
             status.visible_players_loaded = data.players.len() as u32;
-            status.fully_scouted_players = 0;
+            status.fully_scouted_players = data.players.len() as u32;
             status.partial_scout_reports = 0;
             status.database_index_status = data.database_index_status;
             status.database_scope = data.database_scope;
@@ -458,7 +527,7 @@ fn collect_snapshot(
                 status,
                 managed_club_id: Some(data.managed_club_id),
                 manager_name: Some(data.manager_name),
-                season: None,
+                season: data.season,
                 clubs: data.clubs,
                 players: data.players,
                 tactic: None,
@@ -761,7 +830,51 @@ fn extract_live_data(
                 positions.push(POSITION_NAMES[position].to_string());
             }
         }
-        let calculated_position = positions.first().cloned();
+        let calculated_position = position_bytes
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, rating)| **rating)
+            .map(|(position, _)| POSITION_NAMES[position].to_string());
+        let birth_date = read_fm_date(reader, person + profile.constants.person_birth_date_offset);
+        let current_date = read_fm_date(
+            reader,
+            raw_player + profile.constants.player_current_date_offset,
+        );
+        let age = birth_date
+            .zip(current_date)
+            .and_then(|(birth, current)| calculate_age(birth, current));
+        let date_of_birth = birth_date.and_then(format_fm_date);
+        let season = current_date.map(|date| {
+            let next_year = date.year.saturating_add(1);
+            format!("{}/{}", date.year, next_year % 100)
+        });
+        let nationality = read_nationality(reader, person, profile);
+        let attribute_bytes = reader
+            .read_bytes(
+                raw_player + profile.constants.player_attributes_offset,
+                PLAYER_ATTRIBUTE_NAMES.len(),
+            )
+            .ok_or_else(|| {
+                ExtractionFailure::new(
+                    "player_attributes",
+                    "A managed squad attribute record was not readable.",
+                )
+            })?;
+        if attribute_bytes.iter().any(|value| *value > 100) {
+            return Err(ExtractionFailure::new(
+                "player_attributes",
+                "A managed squad attribute record failed its 1–100 storage bounds check.",
+            ));
+        }
+        let visible_attributes = visible_attribute_map(&attribute_bytes);
+        let preferred_foot = preferred_foot_label(attribute_bytes[24], attribute_bytes[25]);
+        let best_role = calculated_position
+            .as_deref()
+            .map(default_role_for_position);
+        let ability_score = calculated_position
+            .as_deref()
+            .and_then(|position| visible_ability_score(position, &visible_attributes));
+        let (strengths, weaknesses) = attribute_evidence(&visible_attributes);
         let player_id = uid.to_string();
         managed_player_ids.insert(player_id.clone());
         managed_index_records.push(IndexedPlayerRecord {
@@ -774,12 +887,16 @@ fn extract_live_data(
         players.push(json!({
             "id": player_id,
             "name": name,
-            "age": null,
-            "nationality": null,
+            "_season": season,
+            "age": age,
+            "dateOfBirth": date_of_birth,
+            "nationality": nationality,
+            "secondNationality": null,
             "positions": positions,
-            "bestRole": null,
+            "bestRole": best_role,
             "currentAbility": null,
             "potentialAbility": null,
+            "abilityScore": ability_score,
             "form": null,
             "averageRating": null,
             "minutesPlayed": null,
@@ -791,86 +908,95 @@ fn extract_live_data(
             "squadImportance": null,
             "developmentTrend": null,
             "tacticalFit": null,
-            "roleFit": null,
-            "strengths": [],
-            "weaknesses": [],
+            "roleFit": ability_score,
+            "preferredFoot": preferred_foot,
+            "strengths": strengths,
+            "weaknesses": weaknesses,
             "clubId": club_id,
             "transferInterest": null,
             "loanInterest": null,
             "transferAvailable": null,
             "loanAvailable": null,
-            "attributes": {},
+            "attributes": visible_attributes,
             "per90": {},
-            "scoutKnowledge": "partly_known",
+            "scoutKnowledge": "fully_known",
+            "scoutConfidence": 100,
+            "lastScoutedDate": null,
+            "reportReliability": null,
             "bestCalculatedPosition": calculated_position,
             "truePrice": null,
             "fairPriceRange": null,
             "valuationLabel": "unavailable",
             "valuationReasoning": ["FM26 valuation fields are not mapped for this exact build."],
             "retrainingSuggestion": null,
-            "roleReasoning": ["Only live positional familiarity is currently validated for this build."],
+            "roleReasoning": ["Role evidence uses only the managed player's visible FM26 attributes and positional familiarity."],
             "riskLevel": "unknown",
             "marketValueAmount": null
         }));
     }
     diagnostics.last_successful_read = Some("extract_managed_squad".to_string());
 
-    let (database_players_indexed, background_players_indexed, database_index_status, database_scope) =
-        if include_database_index {
-            if let Some(progress) = progress {
-                progress("indexing_player_database");
-            }
-            let seed_vtable = player_vtable.ok_or_else(|| {
-                ExtractionFailure::new(
-                    "player_database",
-                    "The live squad did not provide a player type signature.",
-                )
-            })?;
-            match index_full_player_database(
-                reader,
-                profile,
-                process_id,
-                diagnostics.save_pointer.unwrap_or_default(),
-                seed_vtable,
-                &managed_player_ids,
-                managed_index_records,
-            ) {
-                Ok(indexed) => {
-                    if let Some(progress) = progress {
-                        progress("building_visibility_index");
-                    }
-                    diagnostics.last_successful_read =
-                        Some("index_full_player_database".to_string());
-                    (
-                        indexed.total,
-                        indexed.background,
-                        "ready",
-                        "full-save-index",
-                    )
-                }
-                Err(_) => (
-                    player_count as u32,
-                    0,
-                    "partial",
-                    "managed-squad",
-                ),
-            }
-        } else {
-            store_player_index(
-                process_id,
-                diagnostics.save_pointer.unwrap_or_default(),
-                managed_index_records,
-            );
-            (
-                player_count as u32,
-                0,
-                "not_run",
-                "managed-squad",
+    let (
+        database_players_indexed,
+        background_players_indexed,
+        database_index_status,
+        database_scope,
+    ) = if include_database_index {
+        if let Some(progress) = progress {
+            progress("indexing_player_database");
+        }
+        let seed_vtable = player_vtable.ok_or_else(|| {
+            ExtractionFailure::new(
+                "player_database",
+                "The live squad did not provide a player type signature.",
             )
-        };
+        })?;
+        match index_full_player_database(
+            reader,
+            profile,
+            process_id,
+            diagnostics.save_pointer.unwrap_or_default(),
+            seed_vtable,
+            &managed_player_ids,
+            managed_index_records,
+        ) {
+            Ok(indexed) => {
+                if let Some(progress) = progress {
+                    progress("building_visibility_index");
+                }
+                diagnostics.last_successful_read = Some("index_full_player_database".to_string());
+                (
+                    indexed.total,
+                    indexed.background,
+                    "ready",
+                    "full-save-index",
+                )
+            }
+            Err(_) => (player_count as u32, 0, "partial", "managed-squad"),
+        }
+    } else {
+        store_player_index(
+            process_id,
+            diagnostics.save_pointer.unwrap_or_default(),
+            managed_index_records,
+        );
+        (player_count as u32, 0, "not_run", "managed-squad")
+    };
 
+    let season = players
+        .first()
+        .and_then(|player| player.get("_season"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    for player in &mut players {
+        if let Some(object) = player.as_object_mut() {
+            object.remove("_season");
+        }
+    }
     let mut warnings = vec![
-        "Player names and positional familiarity are live; age, attributes, form, contract, value, wage and performance fields remain unavailable for this exact map.".to_string(),
+        "Managed-squad IDs, names, dates of birth, ages, nationality, positions, preferred foot and visible attributes are validated for this FM26 build. Hidden CA/PA is never read or scored.".to_string(),
+        "Form, match ratings, contract, wage, valuation, fitness and squad-status relationships are not yet validated for this build and remain Unknown.".to_string(),
+        "Own-squad players are fully known. Wider-save records remain hidden until FM26 scout-report visibility, ranges and confidence are validated.".to_string(),
         "Live-memory tactic reading is disabled. Tactic Evaluation uses only a user-selected local FMF file.".to_string(),
         "The FM26 shortlist collection is not mapped safely. GlassScout Favorites remains a local list resolved against live players.".to_string(),
     ];
@@ -893,6 +1019,7 @@ fn extract_live_data(
     Ok(LiveData {
         managed_club_id: club_uid.to_string(),
         manager_name,
+        season,
         clubs,
         players,
         database_players_indexed,
@@ -910,11 +1037,7 @@ struct IndexSummary {
 }
 
 #[cfg(target_os = "windows")]
-fn store_player_index(
-    process_id: u32,
-    save_pointer: u64,
-    records: Vec<IndexedPlayerRecord>,
-) {
+fn store_player_index(process_id: u32, save_pointer: u64, records: Vec<IndexedPlayerRecord>) {
     let records = records
         .into_iter()
         .map(|record| (record.id.clone(), record))
@@ -1036,6 +1159,227 @@ fn read_indexed_player_candidate(
         managed_squad: false,
         visibility_safe: false,
     })
+}
+
+fn display_attribute(raw: u8) -> u8 {
+    ((raw.saturating_add(4)) / 5).clamp(1, 20)
+}
+
+fn visible_attribute_map(raw: &[u8]) -> HashMap<String, u8> {
+    PLAYER_ATTRIBUTE_NAMES
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| {
+            !HIDDEN_ATTRIBUTE_INDEXES.contains(index) && !matches!(*index, 24 | 25)
+        })
+        .filter_map(|(index, name)| {
+            raw.get(index)
+                .copied()
+                .map(|value| ((*name).to_string(), display_attribute(value)))
+        })
+        .collect()
+}
+
+fn preferred_foot_label(left: u8, right: u8) -> &'static str {
+    let difference = i16::from(left) - i16::from(right);
+    if difference >= 20 {
+        "Left"
+    } else if difference <= -20 {
+        "Right"
+    } else {
+        "Both"
+    }
+}
+
+fn default_role_for_position(position: &str) -> String {
+    match position {
+        "GK" => "Goalkeeper",
+        "SW" | "DC" => "Central Defender",
+        "DL" | "DR" | "WBL" | "WBR" => "Full-Back",
+        "DM" => "Defensive Midfielder",
+        "ML" | "MR" | "AML" | "AMR" => "Winger",
+        "MC" => "Central Midfielder",
+        "AMC" => "Attacking Midfielder",
+        "ST" => "Advanced Forward",
+        _ => "Natural Position",
+    }
+    .to_string()
+}
+
+fn visible_ability_score(position: &str, attributes: &HashMap<String, u8>) -> Option<u8> {
+    let keys: &[&str] = match position {
+        "GK" => &[
+            "Aerial Reach",
+            "Command of Area",
+            "Communication",
+            "Handling",
+            "One on Ones",
+            "Reflexes",
+            "Positioning",
+            "Decisions",
+        ],
+        "DC" | "SW" => &[
+            "Marking",
+            "Tackling",
+            "Heading",
+            "Positioning",
+            "Anticipation",
+            "Decisions",
+            "Jumping Reach",
+            "Strength",
+        ],
+        "DL" | "DR" | "WBL" | "WBR" => &[
+            "Marking",
+            "Tackling",
+            "Positioning",
+            "Crossing",
+            "Pace",
+            "Acceleration",
+            "Stamina",
+            "Work Rate",
+        ],
+        "DM" => &[
+            "Tackling",
+            "Positioning",
+            "Anticipation",
+            "Decisions",
+            "Passing",
+            "Teamwork",
+            "Work Rate",
+            "Stamina",
+        ],
+        "ML" | "MR" | "AML" | "AMR" => &[
+            "Crossing",
+            "Dribbling",
+            "First Touch",
+            "Off the Ball",
+            "Pace",
+            "Acceleration",
+            "Agility",
+            "Technique",
+        ],
+        "MC" | "AMC" => &[
+            "Passing",
+            "Vision",
+            "First Touch",
+            "Technique",
+            "Decisions",
+            "Anticipation",
+            "Teamwork",
+            "Work Rate",
+        ],
+        "ST" => &[
+            "Finishing",
+            "First Touch",
+            "Off the Ball",
+            "Anticipation",
+            "Composure",
+            "Acceleration",
+            "Pace",
+            "Technique",
+        ],
+        _ => &["Decisions", "Teamwork", "Work Rate", "Natural Fitness"],
+    };
+    let values = keys
+        .iter()
+        .filter_map(|key| attributes.get(*key).copied())
+        .map(u32::from)
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| {
+        let average = values.iter().sum::<u32>() as f32 / values.len() as f32;
+        ((average / 20.0) * 100.0).round().clamp(0.0, 100.0) as u8
+    })
+}
+
+fn attribute_evidence(attributes: &HashMap<String, u8>) -> (Vec<String>, Vec<String>) {
+    let mut values = attributes
+        .iter()
+        .map(|(name, value)| (name.clone(), *value))
+        .collect::<Vec<_>>();
+    values.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    let strengths = values
+        .iter()
+        .take(3)
+        .map(|(name, value)| format!("{name} {value}"))
+        .collect();
+    let weaknesses = values
+        .iter()
+        .rev()
+        .take(3)
+        .map(|(name, value)| format!("{name} {value}"))
+        .collect();
+    (strengths, weaknesses)
+}
+
+fn is_leap_year(year: u16) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+fn month_day(date: FmDate) -> Option<(u8, u8)> {
+    let mut remaining = u32::from(date.day_of_year);
+    if remaining == 0 {
+        return None;
+    }
+    let month_lengths = [
+        31_u32,
+        if is_leap_year(date.year) { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    for (index, length) in month_lengths.iter().enumerate() {
+        if remaining <= *length {
+            return Some(((index + 1) as u8, remaining as u8));
+        }
+        remaining -= length;
+    }
+    None
+}
+
+fn format_fm_date(date: FmDate) -> Option<String> {
+    let (month, day) = month_day(date)?;
+    Some(format!("{:04}-{month:02}-{day:02}", date.year))
+}
+
+fn calculate_age(birth: FmDate, current: FmDate) -> Option<u8> {
+    if current.year < birth.year {
+        return None;
+    }
+    let birthday_passed = current.day_of_year >= birth.day_of_year;
+    let years = current.year - birth.year - u16::from(!birthday_passed);
+    u8::try_from(years).ok().filter(|age| *age <= 100)
+}
+
+#[cfg(target_os = "windows")]
+fn read_fm_date(reader: &mut ProcessReader, address: u64) -> Option<FmDate> {
+    let bytes = reader.read_bytes(address, 4)?;
+    let day_of_year = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let year = u16::from_le_bytes([bytes[2], bytes[3]]);
+    let max_day = if is_leap_year(year) { 366 } else { 365 };
+    (year >= 1900 && day_of_year > 0 && day_of_year <= max_day)
+        .then_some(FmDate { year, day_of_year })
+}
+
+#[cfg(target_os = "windows")]
+fn read_nationality(
+    reader: &mut ProcessReader,
+    person: u64,
+    profile: &EntityMapProfile,
+) -> Option<String> {
+    let nation = reader.read_pointer(person + profile.constants.person_nationality_offset)?;
+    let name = (nation != 0)
+        .then(|| reader.read_pointer(nation + profile.constants.nation_name_offset))
+        .flatten()?;
+    (name != 0)
+        .then(|| reader.read_length_prefixed_string(name))
+        .flatten()
 }
 
 fn display_name(
@@ -1651,8 +1995,21 @@ mod tests {
             assert!(player["potentialAbility"].is_null());
             assert!(player["attributes"]
                 .as_object()
-                .is_some_and(|value| value.is_empty()));
+                .is_some_and(|value| !value.is_empty()));
+            assert_eq!(player["scoutKnowledge"], "fully_known");
         }
+        let lars = snapshot
+            .players
+            .iter()
+            .find(|player| player["id"] == "53179170")
+            .expect("Lars Sveingard");
+        assert_eq!(lars["age"], 30);
+        assert_eq!(lars["dateOfBirth"], "1995-08-13");
+        assert_eq!(lars["nationality"], "Norway");
+        assert_eq!(lars["attributes"]["Aerial Reach"], 15);
+        assert_eq!(lars["attributes"]["Communication"], 12);
+        assert!(lars["attributes"].get("Consistency").is_none());
+        assert!(lars["attributes"].get("Injury Proneness").is_none());
     }
 
     #[cfg(target_os = "windows")]
@@ -1669,10 +2026,7 @@ mod tests {
         );
         assert_eq!(snapshot.status.database_index_status, "ready");
         assert_eq!(snapshot.status.database_scope, "full-save-index");
-        assert!(
-            snapshot.status.database_players_indexed
-                >= snapshot.status.managed_squad_players
-        );
+        assert!(snapshot.status.database_players_indexed >= snapshot.status.managed_squad_players);
         assert!(snapshot.status.background_players_indexed > 0);
         assert_eq!(
             snapshot.status.visible_players_loaded,
@@ -1682,5 +2036,38 @@ mod tests {
         assert!(visible_results
             .iter()
             .all(|player| player["visibility"] == "club-visible"));
+    }
+
+    #[test]
+    fn fm_dates_and_age_match_the_current_save_calendar() {
+        let birth = FmDate {
+            year: 1995,
+            day_of_year: 225,
+        };
+        let current = FmDate {
+            year: 2026,
+            day_of_year: 150,
+        };
+        assert_eq!(format_fm_date(birth).as_deref(), Some("1995-08-13"));
+        assert_eq!(format_fm_date(current).as_deref(), Some("2026-05-30"));
+        assert_eq!(calculate_age(birth, current), Some(30));
+    }
+
+    #[test]
+    fn hidden_and_foot_storage_values_never_enter_visible_attributes() {
+        let raw = vec![50_u8; PLAYER_ATTRIBUTE_NAMES.len()];
+        let attributes = visible_attribute_map(&raw);
+        assert_eq!(attributes.get("Crossing"), Some(&10));
+        for hidden in [
+            "Dirtiness",
+            "Consistency",
+            "Important Matches",
+            "Injury Proneness",
+            "Versatility",
+            "Left Foot",
+            "Right Foot",
+        ] {
+            assert!(!attributes.contains_key(hidden));
+        }
     }
 }

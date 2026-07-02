@@ -773,3 +773,72 @@ body{background:#f8fbfc;color:var(--navy);font-size:14px}
   .phase-toggle{min-width:320px}.tactical-board-compact .pitch-canvas{height:380px}
   .recruitment-pulse{min-height:468px}.dossier-layout{grid-template-columns:minmax(620px,2fr) 290px}.player-facts{grid-template-columns:repeat(5,1fr)}
 }
+
+/* 0.1.5 — flat controls and dossier-consistent live-data views */
+button,
+[data-slot="button"]{
+  box-shadow:none!important;
+  background-image:none!important;
+  transform:none;
+}
+button:active,
+[data-slot="button"]:active{transform:none!important}
+.nav-item-active{background:#e8f6f3!important}
+.phase-toggle button.active{background:#078c7c!important;box-shadow:none!important}
+.setup-download{box-shadow:none!important}
+
+.player-face{
+  display:grid;
+  place-items:center;
+  flex:0 0 auto;
+  overflow:hidden;
+  border:1px solid #c9dde3;
+  border-radius:50%;
+  background:#f2f8f7;
+  color:#4c6680;
+}
+.player-face img{width:100%;height:100%;object-fit:cover}
+.player-face svg{width:45%;height:45%;stroke-width:1.5}
+.player-face-sm{width:40px;height:40px}
+.player-face-md{width:58px;height:58px}
+.player-face-lg{width:68px;height:68px}
+.dossier-heading .player-face-lg{margin-left:2px}
+
+.squad-player-identity{display:flex!important;flex-direction:row!important;align-items:center;gap:10px}
+.squad-player-identity>span{display:flex;min-width:0;flex-direction:column;gap:3px}
+.squad-player-identity strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.player-name-link{padding:0;border:0;background:transparent;color:var(--navy);font-size:8px;font-weight:700;text-align:left}
+.player-name-link:hover{color:var(--primary);text-decoration:underline;text-underline-offset:2px}
+.squad-fit-cell{align-items:center!important;text-align:center}
+.fit-score-ring{
+  --fit-score:0deg;
+  --fit-color:#aebbc6;
+  position:relative;
+  display:grid;
+  place-items:center;
+  width:40px;
+  height:40px;
+  border-radius:50%;
+  background:conic-gradient(var(--fit-color) var(--fit-score),#e4ebef 0);
+}
+.fit-score-ring:after{content:"";position:absolute;inset:4px;border-radius:50%;background:#fff}
+.fit-score-ring strong{position:relative;z-index:1;font-size:10px}
+.fit-score-strong{--fit-color:#19a98f}
+.fit-score-medium{--fit-color:#e3a12a}
+.fit-score-poor{--fit-color:#cf625c}
+.fit-score-unknown{--fit-color:#b9c4cc}
+
+.scout-command-bar{
+  grid-template-columns:minmax(300px,2fr) repeat(4,minmax(115px,1fr));
+  align-items:stretch;
+}
+.scout-filter{padding-right:10px!important}
+.scout-room-board>header,
+.scout-room-board>article{
+  grid-template-columns:minmax(235px,1.45fr) minmax(175px,1fr) 105px 105px 110px 100px 130px 68px;
+  min-width:1160px;
+}
+.scout-fit-cell{display:flex!important;flex-direction:row!important;align-items:center;gap:9px}
+.scout-fit-cell>span:last-child{display:flex;min-width:0;flex-direction:column;gap:3px}
+.knowledge-gate-note{margin:12px 2px 0;color:var(--slate);font-size:10px}
+.target-identity>.player-face{width:42px;height:42px}

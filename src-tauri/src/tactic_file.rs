@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
-    io::Read,
+    io::{Cursor, Read},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -10,7 +10,9 @@ use tauri::{AppHandle, Manager};
 
 const MAX_FMF_FILE_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_INSPECTION_BYTES: usize = 2 * 1024 * 1024;
+const MAX_DECOMPRESSED_INDEX_BYTES: u64 = 2 * 1024 * 1024;
 const FMF_CONTAINER_MAGIC: [u8; 6] = [0x02, 0x01, b'a', b'f', b'e', b'.'];
+const ZSTD_MAGIC: [u8; 4] = [0x28, 0xb5, 0x2f, 0xfd];
 const STATUS_FILE_NAME: &str = "current-tactic.json";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -36,6 +38,7 @@ pub struct TacticFileResult {
     pub parsed_roles: Vec<String>,
     pub parsed_duties: Vec<String>,
     pub detected_format: Option<String>,
+    pub archive_entries: Vec<String>,
     pub compressed: Option<bool>,
     pub encoded: Option<bool>,
     pub warnings: Vec<String>,
@@ -54,6 +57,7 @@ impl TacticFileResult {
             parsed_roles: Vec::new(),
             parsed_duties: Vec::new(),
             detected_format: None,
+            archive_entries: Vec::new(),
             compressed: None,
             encoded: None,
             warnings: Vec::new(),
@@ -235,21 +239,42 @@ fn inspect_fmf(bytes: &[u8], file_size: u64) -> TacticFileResult {
     }
 
     if bytes.starts_with(&FMF_CONTAINER_MAGIC) {
+        let archive_entries = inspect_archive_index(bytes).unwrap_or_default();
+        let index_decoded = !archive_entries.is_empty();
         return TacticFileResult {
             success: true,
             file_name: None,
             file_size: Some(file_size),
             imported_at: None,
-            parser_status: TacticParserStatus::ImportedUnparsed,
+            parser_status: if index_decoded {
+                TacticParserStatus::PartiallyParsed
+            } else {
+                TacticParserStatus::ImportedUnparsed
+            },
             parsed_formation: None,
             parsed_roles: Vec::new(),
             parsed_duties: Vec::new(),
-            detected_format: Some("sports-interactive-fmf-container".to_string()),
+            detected_format: Some(
+                if index_decoded {
+                    "fmf-v2-afe-zstd-index"
+                } else {
+                    "sports-interactive-fmf-container"
+                }
+                .to_string(),
+            ),
+            archive_entries,
             compressed: Some(true),
             encoded: Some(true),
             warnings: vec![
                 "A Sports Interactive FMF container was detected.".to_string(),
-                "Tactic file imported, but this FMF format is not fully decoded yet.".to_string(),
+                if index_decoded {
+                    "The FMF archive index was decoded safely, but the tactic payload remains encrypted by the current FM26 container format.".to_string()
+                } else {
+                    "Tactic file imported, but this FMF format is not fully decoded yet."
+                        .to_string()
+                },
+                "No formation, role or duty is shown until the tactic payload itself is decoded."
+                    .to_string(),
             ],
             errors: Vec::new(),
         };
@@ -275,6 +300,7 @@ fn inspect_fmf(bytes: &[u8], file_size: u64) -> TacticFileResult {
         parsed_roles: Vec::new(),
         parsed_duties: Vec::new(),
         detected_format: Some(format.to_string()),
+        archive_entries: Vec::new(),
         compressed: Some(compressed),
         encoded: Some(!compressed),
         warnings: vec![
@@ -283,6 +309,59 @@ fn inspect_fmf(bytes: &[u8], file_size: u64) -> TacticFileResult {
         ],
         errors: Vec::new(),
     }
+}
+
+fn inspect_archive_index(bytes: &[u8]) -> Option<Vec<String>> {
+    let offset = bytes
+        .windows(ZSTD_MAGIC.len())
+        .position(|window| window == ZSTD_MAGIC)?;
+    let cursor = Cursor::new(bytes.get(offset..)?);
+    let decoder = zstd::stream::read::Decoder::new(cursor).ok()?;
+    let mut unpacked = Vec::new();
+    decoder
+        .take(MAX_DECOMPRESSED_INDEX_BYTES + 1)
+        .read_to_end(&mut unpacked)
+        .ok()?;
+    if unpacked.len() as u64 > MAX_DECOMPRESSED_INDEX_BYTES {
+        return None;
+    }
+    let strings = length_prefixed_strings(&unpacked);
+    let mut entries = Vec::new();
+    for pair in strings.windows(2) {
+        if pair[1].starts_with('.') && pair[1].len() <= 8 {
+            let entry = format!("{}{}", pair[0], pair[1]);
+            if !entries.contains(&entry) {
+                entries.push(entry);
+            }
+        }
+    }
+    (!entries.is_empty()).then_some(entries)
+}
+
+fn length_prefixed_strings(bytes: &[u8]) -> Vec<String> {
+    let mut strings = Vec::new();
+    let mut offset = 0_usize;
+    while offset + 4 <= bytes.len() {
+        let length =
+            u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("four bytes")) as usize;
+        let Some(end) = offset
+            .checked_add(4)
+            .and_then(|start| start.checked_add(length))
+        else {
+            break;
+        };
+        if (1..=64).contains(&length) && end <= bytes.len() {
+            if let Ok(value) = std::str::from_utf8(&bytes[offset + 4..end]) {
+                if value.chars().all(|character| !character.is_control()) {
+                    strings.push(value.to_string());
+                    offset = end;
+                    continue;
+                }
+            }
+        }
+        offset += 1;
+    }
+    strings
 }
 
 fn sha256_file(path: &Path) -> Option<String> {
@@ -318,7 +397,7 @@ mod tests {
         assert!(result.success);
         assert!(matches!(
             result.parser_status,
-            TacticParserStatus::ImportedUnparsed
+            TacticParserStatus::ImportedUnparsed | TacticParserStatus::PartiallyParsed
         ));
         assert!(result.parsed_formation.is_none());
         assert!(result.parsed_roles.is_empty());

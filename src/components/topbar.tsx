@@ -43,8 +43,8 @@ export function Topbar({
       <div className="search-wrap">
         <Search aria-hidden="true" />
         <Input
-          aria-label="Search players, clubs and reports"
-          placeholder={connected ? "Search players, clubs, reports…" : "Load the active FM26 save to search"}
+          aria-label="Search players, clubs and attributes"
+          placeholder={connected ? "Search players, clubs, attributes…" : "Load the active FM26 save to search"}
           value={search}
           onChange={(event) => onSearch(event.target.value)}
           disabled={!connected}

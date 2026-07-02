@@ -1,4 +1,7 @@
+#![recursion_limit = "256"]
+
 mod connector;
+mod player_face;
 mod tactic_file;
 mod visibility;
 
@@ -25,6 +28,7 @@ pub fn run() {
             connector::connector_snapshot,
             connector::load_active_save,
             connector::search_indexed_players,
+            player_face::player_face_data,
             tactic_file::import_tactic_file,
             tactic_file::tactic_file_status,
             visibility::filter_observations

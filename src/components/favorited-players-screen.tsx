@@ -75,7 +75,7 @@ export function FavoritedPlayersScreen({
           ))}
         </section>
       ) : (
-        <section className="favorites-empty"><Star /><h2>No favorited players</h2><p>Add players from Recruitment. Favorites never create or preserve stale player records; they resolve against the latest live FM26 snapshot.</p></section>
+        <section className="favorites-empty"><Star /><h2>No favorited players</h2><p>Add players from Scout Room. Favorites never create or preserve stale player records; they resolve against the latest live FM26 snapshot.</p></section>
       )}
 
       {compareIds.length === 2 ? (

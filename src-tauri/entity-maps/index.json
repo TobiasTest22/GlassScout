@@ -42,7 +42,12 @@
         "clubNameOffset": 192,
         "entityUidOffset": 12,
         "playerPersonOffset": 648,
-        "playerPositionsOffset": 336
+        "playerPositionsOffset": 336,
+        "playerAttributesOffset": 351,
+        "playerCurrentDateOffset": 512,
+        "personNationalityOffset": 104,
+        "nationNameOffset": 24,
+        "personBirthDateOffset": 136
       }
     }
   ]

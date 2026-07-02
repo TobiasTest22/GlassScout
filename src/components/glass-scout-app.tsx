@@ -7,8 +7,7 @@ import { Topbar } from "@/components/topbar";
 import { DashboardScreen } from "@/components/dashboard-screen";
 import { MyTeamScreen } from "@/components/my-team-screen";
 import { TacticsScreen } from "@/components/tactics-screen";
-import { RoleDnaScreen } from "@/components/role-dna-screen";
-import { RecruitmentScreen } from "@/components/recruitment-screen";
+import { ScoutRoomScreen } from "@/components/recruitment-screen";
 import { FavoritedPlayersScreen } from "@/components/favorited-players-screen";
 import { PlayerProfileScreen } from "@/components/player-profile-screen";
 import { StartupScreen } from "@/components/startup-screen";
@@ -150,10 +149,9 @@ export function GlassScoutApp() {
 
   const content =
     screen === "Dashboard" ? <DashboardScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onNavigate={setScreen} /> :
-    screen === "Squad Planner" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onOpenPlayer={openPlayer} /> :
+    screen === "Squad" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onOpenPlayer={openPlayer} /> :
     screen === "Tactical Board" ? <TacticsScreen snapshot={snapshot} importing={importingTactic} onImportTactic={importTactic} /> :
-    screen === "Reports" ? <RoleDnaScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} /> :
-    screen === "Recruitment" || screen === "Scout Room" || screen === "Players" ? <RecruitmentScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
+    screen === "Scout Room" ? <ScoutRoomScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
     screen === "Shortlist" ? <FavoritedPlayersScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onUpdateNote={updatePlayerNote} /> :
     screen === "Player Profile" ? (
       <PlayerProfileScreen
@@ -161,7 +159,7 @@ export function GlassScoutApp() {
         snapshot={snapshot}
         favorite={selectedPlayerId ? favorites.some((record) => record.playerId === selectedPlayerId) : false}
         onToggleFavorite={() => selectedPlayerId && togglePlayerFavorite(selectedPlayerId)}
-        onBack={() => setScreen("Players")}
+        onBack={() => setScreen("Scout Room")}
       />
     ) :
     <SettingsScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} />;
