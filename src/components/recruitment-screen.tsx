@@ -64,7 +64,9 @@ type PlayerRow = {
   roleFitScore: number | null;
   tacticPositionMatch: boolean | null;
   recommendation: RecommendationResult;
-  interest: string;
+  joiningInterest: string;
+  availability: string;
+  hasMappedJoiningInterest: boolean;
   valueAmount: number | null;
   wageAmount: number | null;
   formScore: number | null;
@@ -75,6 +77,18 @@ type PlayerRow = {
   tackles90: number | null;
   aerialWinPct: number | null;
   passPct: number | null;
+};
+
+type TacticNeed = {
+  id: string;
+  slotLabel: string;
+  roleLabel: string;
+  currentPlayer: string;
+  currentFit: number | null;
+  depth: number;
+  bestTarget: PlayerRow | null;
+  severity: "good" | "watch" | "need";
+  note: string;
 };
 
 const PAGE_SIZE = 25;
@@ -146,9 +160,9 @@ const interestedLabels = new Set([
   "Interested",
   "Slightly interested",
   "Only loan possible",
-  "Transfer listed",
-  "Loan listed",
-  "Open",
+  "Only if promoted",
+  "Only if wages are improved",
+  "Only if guaranteed playing time",
 ]);
 
 const nationFlags: Record<string, string> = {
@@ -204,6 +218,7 @@ function indexedPlayer(result: IndexedPlayerSearchResult): LivePlayer {
     loanInterest: result.loanInterest ?? null,
     transferAvailable: result.transferAvailable ?? null,
     loanAvailable: result.loanAvailable ?? null,
+    notForSale: result.notForSale ?? null,
     attributes: {},
     per90: result.per90 ?? {},
     rawStats: result.rawStats ?? {},
@@ -289,22 +304,58 @@ function knowledgeLabel(player: LivePlayer) {
   }
 }
 
-function interestLabel(player: LivePlayer) {
-  if (player.transferInterest) return player.transferInterest;
-  if (player.loanInterest) return player.loanInterest;
+const availabilityOnlyLabels = new Set(["Transfer listed", "Loan listed", "Not for sale", "Open"]);
+
+function cleanMetadataLabel(value: string | null | undefined) {
+  return value?.trim() || null;
+}
+
+function isAvailabilityOnlyLabel(value: string | null | undefined) {
+  const label = cleanMetadataLabel(value);
+  return label ? availabilityOnlyLabels.has(label) : false;
+}
+
+function joiningInterestLabel(player: LivePlayer) {
+  const transfer = cleanMetadataLabel(player.transferInterest);
+  if (transfer && !isAvailabilityOnlyLabel(transfer)) return transfer;
+  const loan = cleanMetadataLabel(player.loanInterest);
+  if (loan && !isAvailabilityOnlyLabel(loan)) return loan;
+  return "Unknown";
+}
+
+function availabilityLabel(player: LivePlayer) {
+  const transfer = cleanMetadataLabel(player.transferInterest);
+  if (transfer && isAvailabilityOnlyLabel(transfer)) return transfer;
+  const loan = cleanMetadataLabel(player.loanInterest);
+  if (loan && isAvailabilityOnlyLabel(loan)) return loan;
+  if (player.notForSale) return "Not for sale";
   if (player.transferAvailable) return "Transfer listed";
   if (player.loanAvailable) return "Loan listed";
-  return "Unknown";
+  return "Standard";
+}
+
+function hasMappedJoiningInterest(player: LivePlayer) {
+  return joiningInterestLabel(player) !== "Unknown";
 }
 
 function interestScore(label: string) {
   const normalized = label.toLowerCase();
   if (normalized.includes("very interested")) return 100;
-  if (normalized === "interested" || normalized.includes("transfer listed")) return 82;
-  if (normalized.includes("slightly") || normalized.includes("loan listed")) return 66;
-  if (normalized.includes("open")) return 60;
-  if (normalized.includes("not for sale") || normalized.includes("not interested")) return 15;
-  return 44;
+  if (normalized === "interested") return 84;
+  if (normalized.includes("slightly")) return 64;
+  if (normalized.includes("loan possible")) return 58;
+  if (normalized.includes("wages") || normalized.includes("playing time") || normalized.includes("promoted")) return 45;
+  if (normalized.includes("doubtful")) return 30;
+  if (normalized.includes("not interested")) return 5;
+  return 34;
+}
+
+function availabilityScore(label: string) {
+  const normalized = label.toLowerCase();
+  if (normalized.includes("not for sale")) return 16;
+  if (normalized.includes("transfer listed")) return 74;
+  if (normalized.includes("loan listed")) return 66;
+  return 48;
 }
 
 function ratingScore(rating: number | null) {
@@ -377,6 +428,12 @@ function matchesTacticPosition(player: LivePlayer, tacticPositions: Set<string>)
   return playerTokens.some((token) => tacticPositions.has(token));
 }
 
+function playerMatchesSlot(player: LivePlayer, slotPosition: string | null | undefined) {
+  const slotTokens = new Set(positionTokens(slotPosition));
+  if (!slotTokens.size) return false;
+  return player.positions.flatMap(positionTokens).some((token) => slotTokens.has(token));
+}
+
 function roleFitScore(player: LivePlayer, tacticPositions: Set<string>) {
   const phaseFit = average([
     player.inPossessionFit ?? null,
@@ -423,7 +480,8 @@ function valueRealismScore(player: LivePlayer, roleFit: number | null, performan
 function recommendationFor(player: LivePlayer, roleFit: number | null, tacticMatch: boolean | null): RecommendationResult {
   const form = ratingScore(player.averageRating);
   const performance = performanceScore(player);
-  const interest = interestLabel(player);
+  const interest = joiningInterestLabel(player);
+  const availability = availabilityLabel(player);
   const market = valueRealismScore(player, roleFit, performance);
   const confidence = player.scoutConfidence ?? 0;
   const availableEvidence = [roleFit, performance, form, market].filter((value) => value != null).length;
@@ -441,12 +499,14 @@ function recommendationFor(player: LivePlayer, roleFit: number | null, tacticMat
     (roleFit ?? 45) * 0.34 +
     (performance ?? 45) * 0.2 +
     (form ?? 45) * 0.12 +
-    market * 0.18 +
-    interestScore(interest) * 0.1 +
+    market * 0.16 +
+    interestScore(interest) * 0.08 +
+    availabilityScore(availability) * 0.04 +
     clamp(confidence) * 0.06;
 
   if (tacticMatch === false) base -= 8;
-  if (interest.toLowerCase().includes("not for sale")) base -= 12;
+  if (!hasMappedJoiningInterest(player)) base -= 4;
+  if (availability.toLowerCase().includes("not for sale")) base -= 12;
 
   const score = Math.round(clamp(base));
   const tone = score >= 78 ? "elite" : score >= 67 ? "strong" : score >= 54 ? "medium" : score >= 40 ? "low" : "unknown";
@@ -469,6 +529,8 @@ function recommendationFor(player: LivePlayer, roleFit: number | null, tacticMat
       roleFit == null ? "role fit unknown" : `role fit ${roleFit}`,
       performance == null ? "per-90 limited" : `performance ${performance}`,
       `market realism ${market}`,
+      interest === "Unknown" ? "joining interest unmapped" : `interest ${interest}`,
+      `availability ${availability}`,
       `${confidence}% knowledge`,
     ],
   };
@@ -479,6 +541,7 @@ function makeRow(player: LivePlayer, snapshot: LiveFootballSnapshot, clubName: s
   const roleFit = roleFitScore(player, tacticPositions);
   const tacticMatch = matchesTacticPosition(player, tacticPositions);
   const form = ratingScore(player.averageRating);
+  const joiningInterest = joiningInterestLabel(player);
   return {
     player,
     clubName,
@@ -487,7 +550,9 @@ function makeRow(player: LivePlayer, snapshot: LiveFootballSnapshot, clubName: s
     roleFitScore: roleFit,
     tacticPositionMatch: tacticMatch,
     recommendation: recommendationFor(player, roleFit, tacticMatch),
-    interest: interestLabel(player),
+    joiningInterest,
+    availability: availabilityLabel(player),
+    hasMappedJoiningInterest: joiningInterest !== "Unknown",
     valueAmount: player.marketValueAmount ?? parseMoney(player.value),
     wageAmount: parseMoney(player.wage),
     formScore: form == null ? null : Math.round(form),
@@ -668,6 +733,50 @@ function rowMatchesSavedFilter(row: PlayerRow, savedFilter: SavedFilter, favorit
   return true;
 }
 
+function tacticNeedsFor(snapshot: LiveFootballSnapshot, rows: PlayerRow[]): TacticNeed[] {
+  const slots = snapshot.tactic?.slots ?? [];
+  if (!slots.length) return [];
+
+  const managedClubId = snapshot.managedClubId;
+  const ownRows = rows.filter((row) => managedClubId && row.player.clubId === managedClubId);
+  const targetRows = rows
+    .filter((row) => !managedClubId || row.player.clubId !== managedClubId)
+    .filter((row) => (row.recommendation.score ?? 0) >= 40)
+    .toSorted((left, right) => (right.recommendation.score ?? -1) - (left.recommendation.score ?? -1));
+
+  return slots.slice(0, 11).map((slot, index) => {
+    const slotLabel = slot.position || `Slot ${index + 1}`;
+    const current = rows.find((row) => row.player.id === slot.playerId);
+    const currentFit = current?.roleFitScore ?? null;
+    const depth = ownRows.filter((row) => playerMatchesSlot(row.player, slotLabel) && (row.roleFitScore ?? 0) >= 50).length;
+    const bestTarget = targetRows.find((row) => playerMatchesSlot(row.player, slotLabel)) ?? null;
+    const severity: TacticNeed["severity"] =
+      currentFit == null || currentFit < 50 || depth < 2
+        ? "need"
+        : currentFit < 64 || depth < 3
+          ? "watch"
+          : "good";
+    const note =
+      severity === "good"
+        ? "covered"
+        : bestTarget
+          ? `${bestTarget.recommendation.label} available in Scout Room`
+          : "no strong external candidate in current filters";
+
+    return {
+      id: `${slotLabel}-${slot.playerId ?? index}`,
+      slotLabel,
+      roleLabel: [slot.role, slot.duty].filter(Boolean).join(" · ") || "Role decoder pending",
+      currentPlayer: current?.player.name ?? "Not picked",
+      currentFit,
+      depth,
+      bestTarget,
+      severity,
+      note,
+    };
+  });
+}
+
 export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onToggleFavorite, onOpenPlayer }: {
   snapshot: LiveFootballSnapshot;
   favorites: FavoriteRecord[];
@@ -768,7 +877,7 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
       const player = row.player;
       const searchable = [player.name, row.clubName, player.nationality, player.bestRole, ...player.positions].filter(Boolean).join(" ").toLowerCase();
       return (!normalized || searchable.includes(normalized))
-        && (!interestedOnly || interestedLabels.has(row.interest))
+        && (!interestedOnly || (row.hasMappedJoiningInterest && interestedLabels.has(row.joiningInterest)))
         && (position === "All" || player.positions.includes(position))
         && (role === "All" || player.bestRole === role)
         && (nationality === "All" || player.nationality === nationality)
@@ -779,7 +888,7 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
         && roleFitBand(roleFit, row.roleFitScore)
         && (knowledge === "All" || row.knowledgeLabel === knowledge)
         && (positionGroup === "All" || groupPlayerPosition(player) === positionGroup)
-        && (interestFilter === "Any" || row.interest === interestFilter)
+        && (interestFilter === "Any" || row.joiningInterest === interestFilter)
         && (row.roleFitScore == null || row.roleFitScore >= minRoleFit)
         && (player.age == null || player.age <= maxAge)
         && (row.valueAmount == null || row.valueAmount <= maxMarketValue)
@@ -800,8 +909,11 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
     const avgRecommendation = Math.round(average(rows.map((row) => row.recommendation.score)) ?? 0);
     const scoutedThisWeek = snapshot.status.fullyScoutedPlayers + snapshot.status.partialScoutReports;
     const topTacticFit = Math.round(average(rows.map((row) => row.roleFitScore).filter((value): value is number => value != null && value >= 50)) ?? 0);
-    return { indexedCount, fullyKnown, wonderkids, bargains, avgRecommendation, scoutedThisWeek, topTacticFit };
+    const mappedInterest = rows.filter((row) => row.hasMappedJoiningInterest).length;
+    return { indexedCount, fullyKnown, wonderkids, bargains, avgRecommendation, scoutedThisWeek, topTacticFit, mappedInterest };
   }, [rows, snapshot.status.databasePlayersIndexed, snapshot.status.fullyScoutedPlayers, snapshot.status.partialScoutReports]);
+
+  const tacticNeeds = useMemo(() => tacticNeedsFor(snapshot, rows), [rows, snapshot]);
 
   const setPreset = (value: SavedFilter) => {
     setSavedFilter((current) => current === value ? "none" : value);
@@ -869,6 +981,57 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
         <MetricCard title="Role Fit Top Tactic" value={`${metrics.topTacticFit}%`} note={snapshot.tactic ? "Tactic-aware fit" : "Load tactic for precision"} icon={<SlidersHorizontal />} variant="donut" onClick={() => setRoleFit("70+")} active={roleFit === "70+"} />
       </section>
 
+      <section className="scout-command-center">
+        <header>
+          <div>
+            <span className="section-kicker">Tactic-linked recruitment</span>
+            <h2>Squad needs from the live tactic</h2>
+            <p>
+              Uses validated FM26 tactic slots, squad depth, role fit, performance evidence, value, wage and mapped joining-interest metadata.
+            </p>
+          </div>
+          <div className="command-center-stats">
+            <span><strong>{tacticNeeds.filter((need) => need.severity === "need").length}</strong> urgent slots</span>
+            <span><strong>{formatCount(metrics.mappedInterest)}</strong> with mapped interest</span>
+          </div>
+        </header>
+        {tacticNeeds.length ? (
+          <div className="tactic-need-grid">
+            {tacticNeeds.map((need) => (
+              <article className={`tactic-need-card ${need.severity}`} key={need.id}>
+                <div>
+                  <strong>{need.slotLabel}</strong>
+                  <small>{need.roleLabel}</small>
+                </div>
+                <dl>
+                  <div><dt>Current</dt><dd>{need.currentPlayer}</dd></div>
+                  <div><dt>Fit</dt><dd>{need.currentFit == null ? "Unknown" : `${need.currentFit}/100`}</dd></div>
+                  <div><dt>Depth</dt><dd>{need.depth} options</dd></div>
+                </dl>
+                {need.bestTarget ? (
+                  <button type="button" className="need-target" onClick={() => onOpenPlayer(need.bestTarget!.player.id)}>
+                    <span>Suggested target</span>
+                    <b>{need.bestTarget.player.name}</b>
+                    <small>
+                      {need.bestTarget.recommendation.score ?? "—"}/100 · {need.bestTarget.joiningInterest}
+                      {!need.bestTarget.hasMappedJoiningInterest ? " · interest unmapped" : ""}
+                    </small>
+                  </button>
+                ) : (
+                  <p>{need.note}</p>
+                )}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="tactic-need-empty">
+            <ShieldCheck />
+            <strong>Live tactic slots are not validated yet.</strong>
+            <span>Scout Room remains searchable, but tactic-linked squad-gap suggestions need a validated tactic read.</span>
+          </div>
+        )}
+      </section>
+
       <section className={filtersOpen ? "scout-database-layout" : "scout-database-layout filters-collapsed"}>
         {filtersOpen ? (
           <aside className="scout-left-filters">
@@ -913,7 +1076,7 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
             <label className="side-select"><span>Role Fit Band</span><select value={roleFit} onChange={(event) => setRoleFit(event.target.value)}>{["Any", "50+", "60+", "70+", "80+"].map((item) => <option key={item}>{item}</option>)}</select></label>
             <label className="side-select"><span>Knowledge</span><select value={knowledge} onChange={(event) => setKnowledge(event.target.value)}>{["All", "Fully known", "Partly known", "Needs scouting", "Unknown"].map((item) => <option key={item}>{item}</option>)}</select></label>
             <label className="side-select"><span>Contract Expires</span><select value={contract} onChange={(event) => setContract(event.target.value)}>{["Any", "Expiring 12m", "Expiring 24m", "Free / no contract"].map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label className="side-select"><span>Interest in Joining</span><select value={interestFilter} onChange={(event) => setInterestFilter(event.target.value)}>{["Any", "Very interested", "Interested", "Transfer listed", "Loan listed", "Not for sale", "Unknown"].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label className="side-select"><span>Interest in Joining</span><select value={interestFilter} onChange={(event) => setInterestFilter(event.target.value)}>{["Any", "Very interested", "Interested", "Slightly interested", "Only loan possible", "Only if promoted", "Only if wages are improved", "Only if guaranteed playing time", "Doubtful", "Not interested", "Unknown"].map((item) => <option key={item}>{item}</option>)}</select></label>
           </aside>
         ) : (
           <button className="show-filters-tab" type="button" onClick={() => setFiltersOpen(true)}><ChevronRight />Show Filters</button>
@@ -999,7 +1162,12 @@ export function ScoutRoomScreen({ snapshot, favorites, checking, onRefresh, onTo
                       <td className="money-cell"><strong>{displayValue(player.value, "—")}</strong>{row.valueAmount ? <small>€{formatCompactCount(row.valueAmount)}</small> : null}</td>
                       <td className="money-cell"><strong>{displayValue(player.wage, "—")}</strong></td>
                       <td className="contract-cell"><strong>{player.contractStatus ?? "—"}</strong><small>{player.contractRemaining ?? ""}</small></td>
-                      <td><span className={`interest-pill ${row.interest.toLowerCase().replaceAll(" ", "-").replaceAll("/", "-")}`}>{row.interest}</span></td>
+                      <td>
+                        <span className="interest-stack">
+                          <span className={`interest-pill ${row.joiningInterest.toLowerCase().replaceAll(" ", "-").replaceAll("/", "-")}`}>{row.joiningInterest}</span>
+                          <small className="availability-pill">{row.availability}</small>
+                        </span>
+                      </td>
                       <td className="recommendation-cell"><ScoreRing value={row.recommendation.score} label="recommendation" /><span>{row.recommendation.label}</span></td>
                       <td onClick={(event) => event.stopPropagation()}><Button variant="ghost" size="icon-sm" className={favorite ? "shortlist-active" : ""} aria-label={`${favorite ? "Remove" : "Add"} ${player.name} shortlist`} onClick={() => onToggleFavorite(player.id)}><Star fill={favorite ? "currentColor" : "none"} /></Button></td>
                       <td onClick={(event) => event.stopPropagation()}><Button variant="ghost" size="icon-sm" aria-label={`More actions for ${player.name}`}><MoreHorizontal /></Button></td>

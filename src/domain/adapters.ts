@@ -87,6 +87,7 @@ export type LivePlayer = {
   loanInterest: string | null;
   transferAvailable: boolean | null;
   loanAvailable: boolean | null;
+  notForSale?: boolean | null;
   attributes?: Record<string, number | null>;
   per90?: Record<string, number | null>;
   inPossessionFit?: number | null;
@@ -349,6 +350,7 @@ export type IndexedPlayerSearchResult = {
   loanInterest?: string | null;
   transferAvailable?: boolean | null;
   loanAvailable?: boolean | null;
+  notForSale?: boolean | null;
   per90?: Record<string, number | null>;
   rawStats?: Record<string, number | null>;
   inPossessionFit?: number | null;

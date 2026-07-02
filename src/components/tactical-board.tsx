@@ -40,15 +40,34 @@ const positionCoordinates: Record<string, [number, number]> = {
 };
 
 function normalizedPosition(value: string) {
-  const upper = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (upper === "CB") return "DC";
-  if (upper === "CM") return "MC";
-  if (upper === "LB") return "DL";
-  if (upper === "RB") return "DR";
-  if (upper === "LW") return "AML";
-  if (upper === "RW") return "AMR";
-  if (upper === "CF") return "ST";
-  return upper;
+  const compact = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (positionCoordinates[compact]) return compact;
+  if (compact === "CB") return "DC";
+  if (compact === "CM") return "MC";
+  if (compact === "LB") return "DL";
+  if (compact === "RB") return "DR";
+  if (compact === "LW") return "AML";
+  if (compact === "RW") return "AMR";
+  if (compact === "CF") return "ST";
+
+  const tokens = value
+    .toUpperCase()
+    .replace(/[(),]/g, " ")
+    .split(/[\s/|-]+/)
+    .filter(Boolean);
+  const side = tokens.find((token) => token === "R" || token === "L" || token === "C") ?? "";
+  const has = (token: string) => tokens.includes(token);
+
+  if (has("GK")) return "GK";
+  if (has("SW")) return "SW";
+  if (has("ST")) return side === "R" ? "STR" : side === "L" ? "STL" : "STC";
+  if (has("AM")) return side === "R" ? "AMR" : side === "L" ? "AML" : "AMC";
+  if (has("M")) return side === "R" ? "MR" : side === "L" ? "ML" : "MC";
+  if (has("DM")) return side === "R" ? "DMR" : side === "L" ? "DML" : "DM";
+  if (has("WB")) return side === "R" ? "WBR" : side === "L" ? "WBL" : "WB";
+  if (has("D")) return side === "R" ? "DR" : side === "L" ? "DL" : "DC";
+
+  return compact;
 }
 
 function positionFamily(value: string) {

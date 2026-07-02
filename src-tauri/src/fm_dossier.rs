@@ -525,10 +525,11 @@ fn indexed_player_json(player: &DossierPlayer) -> Value {
         "minutesPlayed": player.minutes,
         "goals": player.goals,
         "assists": player.assists,
-        "transferInterest": interest_label(player),
-        "loanInterest": if player.loan_listed == Some(1) { Some("Loan listed") } else { None },
+        "transferInterest": Option::<String>::None,
+        "loanInterest": Option::<String>::None,
         "transferAvailable": player.transfer_listed.map(|value| value == 1),
         "loanAvailable": player.loan_listed.map(|value| value == 1),
+        "notForSale": player.not_for_sale.map(|value| value == 1),
         "per90": per90(player),
         "rawStats": raw_stats(player),
         "inPossessionFit": player.top_ip_pct.map(round_percent),
@@ -592,10 +593,11 @@ fn player_json(player: &DossierPlayer) -> Value {
         "weaknesses": attribute_extremes(&player.attributes, false),
         "clubId": player.club_id,
         "clubName": player.club_name,
-        "transferInterest": interest_label(player),
-        "loanInterest": if player.loan_listed == Some(1) { Some("Loan listed") } else { None },
+        "transferInterest": Option::<String>::None,
+        "loanInterest": Option::<String>::None,
         "transferAvailable": player.transfer_listed.map(|value| value == 1),
         "loanAvailable": player.loan_listed.map(|value| value == 1),
+        "notForSale": player.not_for_sale.map(|value| value == 1),
         "attributes": player.attributes,
         "per90": per90(player),
         "rawStats": raw_stats(player),
@@ -720,9 +722,11 @@ fn merge_player(player: &mut Value, dossier: &DossierPlayer) {
         json!(dossier.loan_listed.map(|value| value == 1)),
     );
     object.insert(
-        "transferInterest".to_string(),
-        json!(interest_label(dossier)),
+        "notForSale".to_string(),
+        json!(dossier.not_for_sale.map(|value| value == 1)),
     );
+    object.insert("transferInterest".to_string(), json!(Option::<String>::None));
+    object.insert("loanInterest".to_string(), json!(Option::<String>::None));
     object.insert("clubName".to_string(), json!(dossier.club_name));
     object.insert(
         "dossierReference".to_string(),
@@ -958,18 +962,6 @@ fn preferred_foot_label(player: &DossierPlayer) -> Option<&'static str> {
 
 fn form_label(avg_rating: Option<f64>) -> Option<String> {
     avg_rating.map(|rating| format!("{rating:.2}"))
-}
-
-fn interest_label(player: &DossierPlayer) -> Option<&'static str> {
-    if player.not_for_sale == Some(1) {
-        Some("Not for sale")
-    } else if player.transfer_listed == Some(1) {
-        Some("Transfer listed")
-    } else if player.loan_listed == Some(1) {
-        Some("Loan listed")
-    } else {
-        None
-    }
 }
 
 fn per90(player: &DossierPlayer) -> Value {

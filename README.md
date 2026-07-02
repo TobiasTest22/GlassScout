@@ -39,7 +39,7 @@ GlassScout is live-game only. When the installed FM26 build has no verified enti
 
 ## Install the Windows test build
 
-Download [GlassScout FM26 0.1.8 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.8/GlassScout.FM26_0.1.8_x64-setup.exe).
+Download [GlassScout FM26 0.1.16 for Windows x64](https://github.com/TobiasTest22/GlassScout/releases/download/app-v0.1.16/GlassScout.FM26_0.1.16_x64-setup.exe).
 
 The NSIS setup installs GlassScout locally and uses Tauri's WebView2 bootstrapper when the required Windows web runtime is missing. The prerelease is not code-signed yet, so Windows SmartScreen may ask for confirmation.
 
