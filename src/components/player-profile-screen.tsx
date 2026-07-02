@@ -75,6 +75,26 @@ function PlayerPolygram({ player }: { player: LivePlayer }) {
   );
 }
 
+function RoleFitCards({ player, limit = 6 }: { player: LivePlayer; limit?: number }) {
+  const roles = player.playableRoles?.slice(0, limit) ?? [];
+  if (!roles.length) {
+    return <p className="role-fit-empty">No playable FM26 role score has been validated from the current mapped attributes.</p>;
+  }
+  return (
+    <div className="role-fit-cards">
+      {roles.map((role) => (
+        <article key={role.roleKey} style={{ "--role-score": `${role.score}%` } as CSSProperties}>
+          <span><strong>{role.shortRole}</strong><small>{role.score}</small></span>
+          <div>
+            <b>{role.role}</b>
+            <small>{role.positions.join(" / ")} · position {role.positionFit}% · attributes {role.attributeFit ?? "—"}%</small>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export function PlayerProfileScreen({
   player,
   snapshot,
@@ -110,7 +130,7 @@ export function PlayerProfileScreen({
         <div className="dossier-heading">
           <Button variant="ghost" size="icon" aria-label="Back to players" onClick={onBack}><ArrowLeft /></Button>
           <PlayerFace playerId={player.id} name={player.name} size="lg" />
-          <div><h1>{player.name}</h1><p>Visibility-safe live FM26 dossier</p></div>
+          <div><h1>{player.name}</h1><p>Live FM26 player dossier</p></div>
         </div>
         <div className="dossier-actions">
           <Button variant="outline" disabled><GitCompareArrows data-icon="inline-start" />Compare</Button>
@@ -174,6 +194,7 @@ export function PlayerProfileScreen({
                     <span><i data-tone="low" />Low fit</span>
                   </div>
                 </div>
+                <RoleFitCards player={player} limit={5} />
               </section>
 
               <section className="dossier-panel attribute-evidence-panel">
@@ -228,7 +249,7 @@ export function PlayerProfileScreen({
 
               <section className="dossier-panel decision-panel">
                 <header><ClipboardList /><h2>Decision history</h2></header>
-                <div><span>No visibility-safe decisions recorded</span></div>
+                <div><span>No scouting decisions recorded</span></div>
               </section>
             </aside>
           </div>
@@ -238,10 +259,11 @@ export function PlayerProfileScreen({
           <section className="dossier-panel tab-evidence-panel">
             <header><MapPinned /><h2>In possession / out of possession evidence</h2></header>
             <div className="role-phase-grid">
-              <article><small>In possession</small><strong>{snapshot.tactic ? player.bestRole ?? "Role unknown" : "Live tactic layout pending"}</strong><p>{player.roleFit == null ? "Not enough visible evidence." : `${player.roleFit}/100 role evidence from known attributes.`}</p></article>
-              <article><small>Out of possession</small><strong>{snapshot.tactic ? "Role mapping pending" : "Live tactic layout pending"}</strong><p>No out-of-possession role is inferred until the FM26 phase slot is validated.</p></article>
+              <article><small>Best mapped FM26 role</small><strong>{player.bestRole ?? "Role unknown"}</strong><p>{player.roleFit == null ? "Not enough mapped evidence." : `${player.roleFit}/100 from position familiarity and mapped attributes.`}</p></article>
+              <article><small>Out of possession</small><strong>{snapshot.tactic ? "Tactic packet validation required" : "Live tactic layout pending"}</strong><p>Out-of-possession slot roles are shown only when the FM26 tactic role packet validates.</p></article>
               <article><small>Combined recommendation</small><strong>{player.recommendation?.minimum == null ? "Not enough evidence" : player.recommendation.minimum === player.recommendation.maximum ? player.recommendation.minimum : `${player.recommendation.minimum}–${player.recommendation.maximum}`}</strong><p>{(player.recommendation?.completeness ?? 0) >= 95 ? "Exact score from complete visible evidence." : "Partial observations produce an interval, never a false exact score."}</p></article>
             </div>
+            <RoleFitCards player={player} />
           </section>
         </TabsContent>
         <TabsContent value="attributes">

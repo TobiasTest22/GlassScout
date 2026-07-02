@@ -61,6 +61,8 @@ export type LivePlayer = {
   secondNationality?: string | null;
   positions: string[];
   bestRole: string | null;
+  playableRoles?: PlayerRoleFit[];
+  otherRoles?: PlayerRoleFit[];
   currentAbility: number | null;
   potentialAbility: number | null;
   abilityScore?: number | null;
@@ -105,6 +107,18 @@ export type LivePlayer = {
   knowledge?: Record<string, KnowledgeField<unknown>>;
 };
 
+export type PlayerRoleFit = {
+  roleKey: string;
+  role: string;
+  shortRole: string;
+  roleIdMask: string;
+  positions: string[];
+  score: number;
+  positionFit: number;
+  attributeFit: number | null;
+  evidence: string[];
+};
+
 export type FieldVisibility = "known" | "estimated" | "range" | "unknown";
 
 export type KnowledgeField<T> = {
@@ -133,7 +147,11 @@ export type LiveTacticSlot = {
   playerId: string | null;
   position: string;
   role: string | null;
+  roleShort?: string | null;
+  roleMask?: string | null;
   duty: string | null;
+  dutyShort?: string | null;
+  dutyMask?: string | null;
   decoderStatus?: string;
 };
 
@@ -147,6 +165,12 @@ export type LiveTactic = {
   decoderStatus?: string;
   formationCode?: number;
   layoutStatus?: "exact-template" | "formation-name-only";
+  roleDutyDecoderStatus?: string;
+  rolePacketPointer?: string | null;
+  rolePacketStride?: number | null;
+  rolePacketWidth?: number | null;
+  rolesResolved?: number;
+  dutiesResolved?: number;
   warnings?: string[];
 };
 

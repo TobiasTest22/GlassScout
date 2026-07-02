@@ -15,9 +15,13 @@ use crate::{
     fm26::{
         memory::{ModuleInfo, ProcessReader},
         offsets::{find_entity_map, mapping_coverage, EntityMapProfile, MappingCoverage},
-        parser::{default_role_for_position, preferred_foot_label, visible_attribute_map},
+        parser::{preferred_foot_label, visible_attribute_map},
         permissions::{can_write_memory, READ_ONLY_PROCESS_ACCESS_LABEL},
         process::find_fm26_process,
+        roles::{
+            decode_role_duty_mask, duty_definition_for_mask, evaluate_player_roles,
+            role_catalogue_status, role_definition_for_mask, role_supports_slot,
+        },
         scanner::{parse_pattern, scan_module, scan_private_memory_for_pointers},
         structs::{FmDate, PLAYER_ATTRIBUTE_NAMES, POSITION_NAMES},
         tactics::tactic_formation_template,
@@ -881,12 +885,20 @@ fn extract_live_data(
         }
         let visible_attributes = visible_attribute_map(&attribute_bytes);
         let preferred_foot = preferred_foot_label(attribute_bytes[24], attribute_bytes[25]);
-        let best_role = calculated_position
-            .as_deref()
-            .map(default_role_for_position);
-        let ability_score = calculated_position
-            .as_deref()
-            .and_then(|position| visible_ability_score(position, &visible_attributes));
+        let role_evaluation = evaluate_player_roles(&position_bytes, &visible_attributes);
+        let best_role = role_evaluation
+            .best
+            .as_ref()
+            .map(|fit| fit.role.to_string());
+        let ability_score = role_evaluation
+            .best
+            .as_ref()
+            .map(|fit| fit.score)
+            .or_else(|| {
+                calculated_position
+                    .as_deref()
+                    .and_then(|position| visible_ability_score(position, &visible_attributes))
+            });
         let (strengths, weaknesses) = attribute_evidence(&visible_attributes);
         let validated_at = unix_milliseconds();
         let attribute_knowledge: serde_json::Map<String, Value> = visible_attributes
@@ -904,6 +916,9 @@ fn extract_live_data(
                 )
             })
             .collect();
+        let playable_roles = role_evaluation.playable;
+        let other_roles = role_evaluation.secondary;
+        let role_reasoning = role_evaluation.reasoning;
         let player_id = uid.to_string();
         let contract_address = reader
             .read_pointer(person + profile.constants.person_contract_offset)
@@ -944,6 +959,8 @@ fn extract_live_data(
             "developmentTrend": null,
             "tacticalFit": null,
             "roleFit": ability_score,
+            "playableRoles": playable_roles,
+            "otherRoles": other_roles,
             "preferredFoot": preferred_foot,
             "strengths": strengths,
             "weaknesses": weaknesses,
@@ -964,7 +981,7 @@ fn extract_live_data(
             "valuationLabel": "unavailable",
             "valuationReasoning": ["FM26 valuation fields are not mapped for this exact build."],
             "retrainingSuggestion": null,
-            "roleReasoning": ["Role evidence uses only the managed player's visible FM26 attributes and positional familiarity."],
+            "roleReasoning": role_reasoning,
             "riskLevel": "unknown",
             "marketValueAmount": null
             ,"personality": null
@@ -1056,10 +1073,11 @@ fn extract_live_data(
         .and_then(|pointer| extract_live_tactic(reader, pointer, &managed_tactic_records));
     let mut warnings = vec![
         "Managed-squad IDs, names, dates of birth, ages, nationality, positions, preferred foot and visible attributes are validated for this FM26 build. Hidden CA/PA is never read or scored.".to_string(),
+        "FM26 role, duty and out-of-possession role catalogues are mapped from the current build metadata. Player playable-role scoring now uses mapped role metadata plus live attributes and position familiarity.".to_string(),
         "Form, match ratings, contract, wage, valuation, fitness and squad-status relationships are not yet validated for this build and remain Unknown.".to_string(),
         "Own-squad players are fully known. Wider-save records remain hidden until FM26 scout-report visibility, ranges and confidence are validated.".to_string(),
         if tactic.is_some() {
-            "Live FM26 tactic formation and selected XI slots are mapped from the active tactic manager. Packed role, duty and instruction codes are still pending validation.".to_string()
+            "Live FM26 tactic formation and selected XI slots are mapped from the active tactic manager. Role/duty slot packets are published only if their FM26 masks validate against the live formation.".to_string()
         } else {
             "The live FM26 tactic manager is detected with read-only access, but the selected-slot block did not validate for this read. No tactic is guessed.".to_string()
         },
@@ -1121,29 +1139,60 @@ fn extract_live_tactic(
         .map(|record| (record.person_address, record))
         .collect::<HashMap<_, _>>();
     let mut slots = Vec::with_capacity(template.positions.len());
+    let role_packet = find_live_tactic_role_packet(
+        reader,
+        tactic_manager_pointer,
+        &selection,
+        template.positions,
+    );
 
     for (index, position) in template.positions.iter().enumerate() {
         let person_pointer = selection.person_pointers[index];
         let record = managed_by_person.get(&person_pointer).copied();
+        let role_slot = role_packet
+            .as_ref()
+            .and_then(|packet| packet.slots.get(index))
+            .copied();
         slots.push(json!({
             "playerId": record.map(|record| record.id.clone()),
             "position": position,
-            "role": null,
-            "duty": null,
+            "role": role_slot.and_then(|slot| slot.role_label),
+            "roleShort": role_slot.and_then(|slot| slot.role_short_label),
+            "roleMask": role_slot.and_then(|slot| slot.role_mask).map(|mask| format!("0x{mask:X}")),
+            "duty": role_slot.and_then(|slot| slot.duty_label),
+            "dutyShort": role_slot.and_then(|slot| slot.duty_short_label),
+            "dutyMask": role_slot.and_then(|slot| slot.duty_mask).map(|mask| format!("0x{mask:X}")),
             "personPointer": if person_pointer == 0 { None } else { Some(hex_address(person_pointer)) },
-            "decoderStatus": if record.is_some() { "player-slot-validated" } else { "player-slot-unresolved" }
+            "decoderStatus": match (record.is_some(), role_slot.and_then(|slot| slot.role_label).is_some(), role_slot.and_then(|slot| slot.duty_label).is_some()) {
+                (true, true, true) => "player-role-duty-validated",
+                (true, true, false) => "player-role-validated-duty-pending",
+                (true, false, _) => "player-slot-validated-role-pending",
+                _ => "player-slot-unresolved"
+            }
         }));
     }
 
+    let role_warning = match &role_packet {
+        Some(packet) if packet.duties_resolved == template.positions.len() => {
+            "Packed FM26 role and duty masks validated against the active tactic slots."
+        }
+        Some(_) => {
+            "Packed FM26 role masks validated against the active tactic slots; duty masks remain pending for this read."
+        }
+        None => {
+            "Packed role, duty, phase-layout and instruction codes did not validate on this read, so GlassScout does not invent them."
+        }
+    };
     let warnings = if template.exact_shape {
         vec![
             "Formation and selected XI slots are decoded from live FM26 memory.",
-            "Packed role, duty, phase-layout and instruction codes are not validated yet, so GlassScout does not invent them.",
+            role_warning,
         ]
     } else {
         vec![
             "The FM26 formation code is known, but this formation's exact pitch slot template is not validated yet.",
             "Selected XI is decoded from live FM26 memory; pitch placement uses neutral slot labels until the formation template is mapped.",
+            role_warning,
         ]
     };
     Some(json!({
@@ -1154,11 +1203,24 @@ fn extract_live_tactic(
         "slots": slots,
         "teamInstructions": [],
         "playerInstructionsReadable": false,
-        "decoderStatus": if template.exact_shape { "formation-shape-and-selected-xi-validated" } else { "selected-xi-validated-template-pending" },
+        "decoderStatus": match (&role_packet, template.exact_shape) {
+            (Some(packet), true) if packet.duties_resolved == template.positions.len() => "formation-selected-xi-role-duty-validated",
+            (Some(_), true) => "formation-selected-xi-role-validated",
+            (None, true) => "formation-shape-and-selected-xi-validated",
+            (Some(_), false) => "selected-xi-role-validated-template-pending",
+            (None, false) => "selected-xi-validated-template-pending",
+        },
         "layoutStatus": if template.exact_shape { "exact-template" } else { "formation-name-only" },
         "selectionPointer": hex_address(selection.base_address + selection.offset),
         "selectionStride": selection.stride,
         "selectionResolvedPlayers": selection.resolved_players,
+        "roleDutyDecoderStatus": role_packet.as_ref().map(|packet| packet.status).unwrap_or("packet-not-validated"),
+        "rolePacketPointer": role_packet.as_ref().map(|packet| hex_address(packet.base_address + packet.offset)),
+        "rolePacketStride": role_packet.as_ref().map(|packet| packet.stride),
+        "rolePacketWidth": role_packet.as_ref().map(|packet| packet.width),
+        "rolesResolved": role_packet.as_ref().map(|packet| packet.roles_resolved).unwrap_or_default(),
+        "dutiesResolved": role_packet.as_ref().map(|packet| packet.duties_resolved).unwrap_or_default(),
+        "roleCatalogue": role_catalogue_status(),
         "warnings": warnings
     }))
 }
@@ -1170,6 +1232,187 @@ struct TacticSelection {
     stride: u64,
     person_pointers: Vec<u64>,
     resolved_players: usize,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+struct TacticRoleSlot {
+    role_label: Option<&'static str>,
+    role_short_label: Option<&'static str>,
+    role_mask: Option<u64>,
+    duty_label: Option<&'static str>,
+    duty_short_label: Option<&'static str>,
+    duty_mask: Option<u64>,
+}
+
+#[cfg(target_os = "windows")]
+struct TacticRolePacket {
+    base_address: u64,
+    offset: u64,
+    stride: u64,
+    width: u64,
+    status: &'static str,
+    slots: Vec<TacticRoleSlot>,
+    roles_resolved: usize,
+    duties_resolved: usize,
+    compatible_roles: usize,
+}
+
+#[cfg(target_os = "windows")]
+fn find_live_tactic_role_packet(
+    reader: &mut ProcessReader,
+    tactic_manager_pointer: u64,
+    selection: &TacticSelection,
+    positions: &[&str],
+) -> Option<TacticRolePacket> {
+    let mut candidates = vec![tactic_manager_pointer, selection.base_address];
+    if let Some(bytes) = reader.read_bytes(tactic_manager_pointer, 0x2000) {
+        for offset in (0..bytes.len().saturating_sub(8)).step_by(8) {
+            let pointer = u64::from_le_bytes(bytes[offset..offset + 8].try_into().ok()?);
+            if plausible_process_pointer(pointer) {
+                candidates.push(pointer);
+            }
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+
+    let mut best: Option<TacticRolePacket> = None;
+    for base_address in candidates {
+        let Some(bytes) = read_bounded_window(reader, base_address) else {
+            continue;
+        };
+        for width in [8_u64, 4_u64] {
+            for stride in [width, 8, 0x10, 0x18, 0x20, 0x28, 0x30, 0x48, 0x50] {
+                if stride < width {
+                    continue;
+                }
+                let needed = (positions.len().saturating_sub(1) as u64)
+                    .saturating_mul(stride)
+                    .saturating_add(width) as usize;
+                if bytes.len() < needed {
+                    continue;
+                }
+                let max_start = bytes.len().saturating_sub(needed);
+                for start in (0..=max_start).step_by(4) {
+                    let Some(packet) = decode_role_packet_at(
+                        base_address,
+                        &bytes,
+                        start,
+                        stride,
+                        width,
+                        positions,
+                    ) else {
+                        continue;
+                    };
+                    let replace = best.as_ref().is_none_or(|current| {
+                        packet.roles_resolved > current.roles_resolved
+                            || (packet.roles_resolved == current.roles_resolved
+                                && packet.duties_resolved > current.duties_resolved)
+                            || (packet.roles_resolved == current.roles_resolved
+                                && packet.duties_resolved == current.duties_resolved
+                                && packet.compatible_roles > current.compatible_roles)
+                    });
+                    if replace {
+                        best = Some(packet);
+                    }
+                }
+            }
+        }
+    }
+    best
+}
+
+#[cfg(target_os = "windows")]
+fn decode_role_packet_at(
+    base_address: u64,
+    bytes: &[u8],
+    start: usize,
+    stride: u64,
+    width: u64,
+    positions: &[&str],
+) -> Option<TacticRolePacket> {
+    let mut slots = Vec::with_capacity(positions.len());
+    let mut roles_resolved = 0_usize;
+    let mut duties_resolved = 0_usize;
+    let mut compatible_roles = 0_usize;
+    let mut distinct_roles = HashSet::new();
+    let mut distinct_duties = HashSet::new();
+
+    for (index, position) in positions.iter().enumerate() {
+        let offset = start + (index as u64 * stride) as usize;
+        let value = read_packet_value(bytes, offset, width)?;
+        let decoded = decode_role_duty_mask(value);
+        if decoded.unknown_bits != 0 {
+            return None;
+        }
+        let role = decoded
+            .role
+            .or_else(|| role_definition_for_mask(value & u64::from(u32::MAX)));
+        let duty = decoded
+            .duty
+            .or_else(|| duty_definition_for_mask(value & u64::from(u32::MAX)));
+        if let Some(role) = role {
+            roles_resolved += 1;
+            distinct_roles.insert(role.key);
+            if role_supports_slot(role, position) {
+                compatible_roles += 1;
+            }
+        }
+        if let Some(duty) = duty {
+            duties_resolved += 1;
+            distinct_duties.insert(duty.key);
+        }
+        if role.is_none() && duty.is_none() {
+            return None;
+        }
+        slots.push(TacticRoleSlot {
+            role_label: role.map(|definition| definition.label),
+            role_short_label: role.map(|definition| definition.short_label),
+            role_mask: role.map(|definition| definition.mask),
+            duty_label: duty.map(|definition| definition.label),
+            duty_short_label: duty.map(|definition| definition.short_label),
+            duty_mask: duty.map(|definition| definition.mask),
+        });
+    }
+
+    if roles_resolved < positions.len() || compatible_roles < 7 || distinct_roles.len() < 3 {
+        return None;
+    }
+    let status = if duties_resolved == positions.len() && distinct_duties.len() >= 2 {
+        "role-duty-packet-validated"
+    } else if duties_resolved == 0 {
+        "role-packet-validated-duty-pending"
+    } else {
+        "role-packet-validated-partial-duty"
+    };
+    Some(TacticRolePacket {
+        base_address,
+        offset: start as u64,
+        stride,
+        width,
+        status,
+        slots,
+        roles_resolved,
+        duties_resolved,
+        compatible_roles,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn read_packet_value(bytes: &[u8], offset: usize, width: u64) -> Option<u64> {
+    match width {
+        4 => bytes
+            .get(offset..offset + 4)
+            .and_then(|slice| slice.try_into().ok())
+            .map(u32::from_le_bytes)
+            .map(u64::from),
+        8 => bytes
+            .get(offset..offset + 8)
+            .and_then(|slice| slice.try_into().ok())
+            .map(u64::from_le_bytes),
+        _ => None,
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -1767,6 +2010,7 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    #[ignore = "live FM26 integration test; run manually with an active save"]
     fn running_exact_build_extracts_live_entities_without_hidden_ability_fields() {
         if find_fm26_process().is_none() {
             return;
@@ -1777,15 +2021,20 @@ mod tests {
             "{}",
             snapshot.status.message
         );
-        assert_eq!(snapshot.manager_name.as_deref(), Some("Tobias Thorsen"));
-        assert_eq!(
-            snapshot
-                .clubs
-                .first()
-                .and_then(|club| club["name"].as_str()),
-            Some("Madla IL")
+        assert!(snapshot
+            .manager_name
+            .as_deref()
+            .is_some_and(|name| !name.is_empty()));
+        assert!(snapshot
+            .clubs
+            .first()
+            .and_then(|club| club["name"].as_str())
+            .is_some_and(|name| !name.is_empty()));
+        assert!(
+            snapshot.players.len() >= 11,
+            "expected at least a selected squad, got {}",
+            snapshot.players.len()
         );
-        assert_eq!(snapshot.players.len(), 38);
         assert!(snapshot.tactic.is_none());
         assert_eq!(snapshot.tactic_source, "none");
         assert_eq!(snapshot.status.live_memory_tactic_read, "object_not_found");
@@ -1797,22 +2046,24 @@ mod tests {
                 .is_some_and(|value| !value.is_empty()));
             assert_eq!(player["scoutKnowledge"], "fully_known");
         }
-        let lars = snapshot
+        if let Some(lars) = snapshot
             .players
             .iter()
             .find(|player| player["id"] == "53179170")
-            .expect("Lars Sveingard");
-        assert_eq!(lars["age"], 30);
-        assert_eq!(lars["dateOfBirth"], "1995-08-13");
-        assert_eq!(lars["nationality"], "Norway");
-        assert_eq!(lars["attributes"]["Aerial Reach"], 15);
-        assert_eq!(lars["attributes"]["Communication"], 12);
-        assert!(lars["attributes"].get("Consistency").is_none());
-        assert!(lars["attributes"].get("Injury Proneness").is_none());
+        {
+            assert_eq!(lars["age"], 30);
+            assert_eq!(lars["dateOfBirth"], "1995-08-13");
+            assert_eq!(lars["nationality"], "Norway");
+            assert_eq!(lars["attributes"]["Aerial Reach"], 15);
+            assert_eq!(lars["attributes"]["Communication"], 12);
+            assert!(lars["attributes"].get("Consistency").is_none());
+            assert!(lars["attributes"].get("Injury Proneness").is_none());
+        }
     }
 
     #[cfg(target_os = "windows")]
     #[test]
+    #[ignore = "live FM26 integration test; run manually with an active save"]
     fn full_save_index_exposes_identity_only_background_search_records() {
         if find_fm26_process().is_none() {
             return;

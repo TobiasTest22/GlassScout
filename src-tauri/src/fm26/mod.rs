@@ -3,6 +3,7 @@ pub(crate) mod offsets;
 pub(crate) mod parser;
 pub(crate) mod permissions;
 pub(crate) mod process;
+pub(crate) mod roles;
 pub(crate) mod scanner;
 pub(crate) mod structs;
 pub(crate) mod tactics;

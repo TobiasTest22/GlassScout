@@ -44,7 +44,7 @@ export function TacticalBoard({
       <header className="tactical-board-header">
         <div>
           <h2>{compact ? "System overview" : "Tactical board"}</h2>
-          {!compact ? <p>Formation and selected XI are read from live FM26 memory. Roles and duties appear once their packed codes validate.</p> : null}
+          {!compact ? <p>Formation and selected XI are read from live FM26 memory. FM26 role and duty masks appear when the packet validates.</p> : null}
         </div>
         <div className="phase-toggle" role="group" aria-label="Tactical phase">
           {(["In Possession", "Out of Possession", "Combined"] as const).map((item) => (
@@ -70,7 +70,7 @@ export function TacticalBoard({
             <button key={`${slot.position}-${index}`} className="pitch-player" style={{ left: `${left}%`, top: `${top}%` }} onClick={() => player && onOpenPlayer?.(player.id)} disabled={!player}>
               <span className="fit-ring" style={{ "--fit": `${fit ?? 0}%` } as CSSProperties} data-known={fit != null}>{fit ?? "—"}</span>
               <strong>{player?.name ?? "Unassigned"}</strong>
-              <small>{slot.position} · {slot.role ?? "Role pending"}{slot.duty ? ` · ${slot.duty}` : ""}</small>
+              <small>{slot.position} · {slot.roleShort ?? slot.role ?? "Role pending"}{slot.dutyShort || slot.duty ? ` · ${slot.dutyShort ?? slot.duty}` : ""}</small>
             </button>
           );
         })}

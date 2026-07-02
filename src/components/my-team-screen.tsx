@@ -25,6 +25,7 @@ function shown(value: string | number | null | undefined) {
 }
 
 function PlayerRow({ player, onOpenPlayer }: { player: LivePlayer; onOpenPlayer: (id: string) => void }) {
+  const roleHint = player.playableRoles?.slice(1, 3).map((role) => role.shortRole).join(" / ");
   return (
     <article className="squad-player-row squad-player-row-rich" onClick={() => onOpenPlayer(player.id)}>
       <div className="squad-player-identity">
@@ -32,7 +33,7 @@ function PlayerRow({ player, onOpenPlayer }: { player: LivePlayer; onOpenPlayer:
         <span><button className="player-name-link">{player.name}</button><small>{shown(player.nationality)} · {shown(player.age)} yrs</small></span>
       </div>
       <span><strong>{player.positions.join(" / ") || "Unknown"}</strong><small>{player.preferredFoot ? `${player.preferredFoot} foot` : "Foot unknown"}</small></span>
-      <span><strong>{shown(player.bestRole)}</strong><small>Role evidence</small></span>
+      <span><strong>{shown(player.bestRole)}</strong><small>{roleHint ? `Also ${roleHint}` : "Role evidence"}</small></span>
       <span className="squad-fit-cell"><FitRing value={player.roleFit} /><small>0–100</small></span>
       <span><strong>{shown(player.averageRating?.toFixed(2))}</strong><small>Current form</small></span>
       <span><strong>{shown(player.contractStatus)}</strong><small>{shown(player.wage)} wage</small></span>

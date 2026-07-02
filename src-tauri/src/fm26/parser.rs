@@ -31,18 +31,3 @@ pub(crate) fn preferred_foot_label(left: u8, right: u8) -> &'static str {
         "Both"
     }
 }
-
-pub(crate) fn default_role_for_position(position: &str) -> String {
-    match position {
-        "GK" => "Goalkeeper",
-        "SW" | "DC" => "Central Defender",
-        "DL" | "DR" | "WBL" | "WBR" => "Full-Back",
-        "DM" => "Defensive Midfielder",
-        "ML" | "MR" | "AML" | "AMR" => "Winger",
-        "MC" => "Central Midfielder",
-        "AMC" => "Attacking Midfielder",
-        "ST" => "Advanced Forward",
-        _ => "Natural Position",
-    }
-    .to_string()
-}

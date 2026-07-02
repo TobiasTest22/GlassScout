@@ -8,6 +8,9 @@ export function TacticsScreen({ snapshot }: { snapshot: LiveFootballSnapshot }) 
   const ready = snapshot.tacticSource === "live-memory" && snapshot.tactic != null;
   const objectDetected = snapshot.status.liveMemoryTacticRead === "object_detected_unmapped";
   const tacticObjectDetected = ready || objectDetected;
+  const rolesResolved = snapshot.tactic?.rolesResolved ?? 0;
+  const dutiesResolved = snapshot.tactic?.dutiesResolved ?? 0;
+  const roleDutyStatus = snapshot.tactic?.roleDutyDecoderStatus ?? "packet-not-validated";
 
   return (
     <main className="screen tactical-workspace">
@@ -31,7 +34,8 @@ export function TacticsScreen({ snapshot }: { snapshot: LiveFootballSnapshot }) 
               <div><dt>FM26 enum</dt><dd>{snapshot.tactic?.formationEnum ?? "Not available"}</dd></div>
               <div><dt>Pitch layout</dt><dd>{snapshot.tactic?.layoutStatus === "exact-template" ? "Template mapped" : ready ? "Selected XI only" : "Not validated"}</dd></div>
               <div><dt>Selected XI</dt><dd>{snapshot.tactic?.slots.length ? `${snapshot.tactic.slots.length} live slots` : "Not validated"}</dd></div>
-              <div><dt>Roles and duties</dt><dd>{ready ? "Decoder pending" : "Not validated"}</dd></div>
+              <div><dt>Roles and duties</dt><dd>{ready ? `${rolesResolved}/11 roles · ${dutiesResolved}/11 duties` : "Not validated"}</dd></div>
+              <div><dt>Role packet</dt><dd>{ready ? roleDutyStatus.replaceAll("-", " ") : "Not validated"}</dd></div>
               <div><dt>Instructions</dt><dd>{snapshot.tactic?.teamInstructions.length ? "Available" : ready ? "Decoder pending" : "Not validated"}</dd></div>
             </dl>
           </section>
@@ -40,7 +44,11 @@ export function TacticsScreen({ snapshot }: { snapshot: LiveFootballSnapshot }) 
             <p>
               {ready
                 ? snapshot.tactic?.layoutStatus === "exact-template"
-                  ? "The active FM26 formation template and selected XI have passed memory validation. Role/duty fit remains disabled until the packed role codes validate."
+                  ? rolesResolved === 11
+                    ? dutiesResolved === 11
+                      ? "The active FM26 formation, selected XI, roles and duties have passed live memory validation."
+                      : "The active FM26 formation, selected XI and role masks have passed live memory validation. Duty masks are still pending for this read."
+                    : "The active FM26 formation template and selected XI have passed memory validation. Role/duty fit remains disabled until the packed role codes validate."
                   : "The active FM26 formation code and selected XI are live. Exact pitch placement for this formation still needs template validation, so no role/duty fit is invented."
                 : objectDetected
                   ? "GlassScout found FM26’s live tactic manager, but the selected-slot block did not validate for this read. No tactic or fit score is invented."
