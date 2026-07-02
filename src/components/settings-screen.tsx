@@ -77,7 +77,7 @@ export function SettingsScreen({
           <div><dt>Managed squad players</dt><dd>{status.managedSquadPlayers}</dd></div>
           <div><dt>Player records indexed</dt><dd>{status.databasePlayersIndexed}</dd></div>
           <div><dt>Background records gated</dt><dd>{status.backgroundPlayersIndexed}</dd></div>
-          <div><dt>Visibility-safe players</dt><dd>{status.visiblePlayersLoaded}</dd></div>
+          <div><dt>Readable player profiles</dt><dd>{status.visiblePlayersLoaded}</dd></div>
           <div><dt>Fully scouted players</dt><dd>{status.fullyScoutedPlayers}</dd></div>
           <div><dt>Partial scout reports</dt><dd>{status.partialScoutReports}</dd></div>
           <div><dt>Live memory tactic read</dt><dd>{status.liveMemoryTacticRead ?? "disabled"}</dd></div>

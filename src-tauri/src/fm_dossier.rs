@@ -300,7 +300,7 @@ fn read_player(connection: &Connection, uid: &str) -> rusqlite::Result<Option<Do
     if let Some(player) = player.as_mut() {
         player.positions = read_positions(connection, uid_i64)?;
         player.position_bytes = position_bytes(&player.positions);
-        if player.is_ours || player.scout_confidence >= 100 {
+        if player.is_ours || player.scout_confidence > 0 {
             player.attributes = read_attributes(connection, uid_i64)?;
         }
     }
@@ -520,10 +520,23 @@ fn indexed_player_json(player: &DossierPlayer) -> Value {
         "value": money_label(player.value, false),
         "wage": money_label(player.wage, true),
         "contractStatus": contract_label(player),
+        "contractRemaining": player.contract_remaining_text,
         "averageRating": player.avg_rating,
         "minutesPlayed": player.minutes,
         "goals": player.goals,
         "assists": player.assists,
+        "transferInterest": interest_label(player),
+        "loanInterest": if player.loan_listed == Some(1) { Some("Loan listed") } else { None },
+        "transferAvailable": player.transfer_listed.map(|value| value == 1),
+        "loanAvailable": player.loan_listed.map(|value| value == 1),
+        "per90": per90(player),
+        "rawStats": raw_stats(player),
+        "inPossessionFit": player.top_ip_pct.map(round_percent),
+        "outOfPossessionFit": player.top_oop_pct.map(round_percent),
+        "projectedInPossessionFit": player.top_ip_proj_pct.map(round_percent),
+        "projectedOutOfPossessionFit": player.top_oop_proj_pct.map(round_percent),
+        "efficiencyScore": player.eff_score,
+        "marketValueAmount": player.value,
     })
 }
 

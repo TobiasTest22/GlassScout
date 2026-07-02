@@ -115,6 +115,7 @@ export function GlassScoutApp() {
   const [snapshot, setSnapshot] = useState<LiveFootballSnapshot>(initialSnapshot);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [selectedClubId, setSelectedClubId] = useState<string | null>(null);
+  const [returnScreen, setReturnScreen] = useState<Screen>("Scout Room");
   const [globalIndexed, setGlobalIndexed] = useState<IndexedPlayerSearchResult[]>([]);
   const [favorites, setFavorites] = useState<FavoriteRecord[]>(() => {
     if (typeof window === "undefined") return [];
@@ -173,11 +174,13 @@ export function GlassScoutApp() {
     }
   }, []);
   const openPlayer = useCallback((playerId: string) => {
+    setReturnScreen((current) => screen === "Player Profile" || screen === "Club Profile" ? current : screen);
     setSelectedPlayerId(playerId);
     setScreen("Player Profile");
     void loadIndexedPlayerProfile(playerId);
-  }, [loadIndexedPlayerProfile]);
+  }, [loadIndexedPlayerProfile, screen]);
   const openClub = (clubId: string) => {
+    setReturnScreen((current) => screen === "Player Profile" || screen === "Club Profile" ? current : screen);
     setSelectedClubId(clubId);
     setScreen("Club Profile");
   };
@@ -194,7 +197,7 @@ export function GlassScoutApp() {
   const content =
     screen === "Dashboard" ? <DashboardScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onNavigate={setScreen} /> :
     screen === "Squad" ? <MyTeamScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} onOpenPlayer={openPlayer} /> :
-    screen === "Tactical Board" ? <TacticsScreen snapshot={snapshot} /> :
+    screen === "Tactical Board" ? <TacticsScreen snapshot={snapshot} onOpenPlayer={openPlayer} /> :
     screen === "Scout Room" ? <ScoutRoomScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onOpenPlayer={openPlayer} /> :
     screen === "Shortlist" ? <FavoritedPlayersScreen snapshot={snapshot} favorites={favorites} checking={checking} onRefresh={checkConnection} onToggleFavorite={togglePlayerFavorite} onUpdateNote={updatePlayerNote} onOpenPlayer={openPlayer} /> :
     screen === "Player Profile" ? (
@@ -203,10 +206,10 @@ export function GlassScoutApp() {
         snapshot={snapshot}
         favorite={selectedPlayerId ? favorites.some((record) => record.playerId === selectedPlayerId) : false}
         onToggleFavorite={() => selectedPlayerId && togglePlayerFavorite(selectedPlayerId)}
-        onBack={() => setScreen("Scout Room")}
+        onBack={() => setScreen(returnScreen)}
         onOpenClub={openClub}
       />
-    ) : screen === "Club Profile" ? <ClubProfileScreen clubId={selectedClubId} snapshot={snapshot} onBack={() => setScreen("Scout Room")} onOpenPlayer={openPlayer} /> :
+    ) : screen === "Club Profile" ? <ClubProfileScreen clubId={selectedClubId} snapshot={snapshot} onBack={() => setScreen(returnScreen)} onOpenPlayer={openPlayer} /> :
     <SettingsScreen snapshot={snapshot} checking={checking} onRefresh={checkConnection} />;
 
   return (

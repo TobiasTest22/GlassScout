@@ -106,7 +106,7 @@ export function FavoritedPlayersScreen({
           ))}
         </section>
       ) : (
-        <section className="favorites-empty"><Star /><h2>No shortlisted players</h2><p>Add players from Scout Room. Their identity resolves against the active save and hidden evidence remains masked.</p></section>
+        <section className="favorites-empty"><Star /><h2>No shortlisted players</h2><p>Add players from Scout Room. Their profile opens from the active save when enough data is mapped.</p></section>
       )}
 
       {compareIds.length === 2 ? (

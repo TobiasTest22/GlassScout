@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, Cpu, ShieldCheck } from "lucide-react";
 import type { LiveFootballSnapshot } from "@/domain/adapters";
 import { TacticalBoard } from "@/components/tactical-board";
 
-export function TacticsScreen({ snapshot }: { snapshot: LiveFootballSnapshot }) {
+export function TacticsScreen({ snapshot, onOpenPlayer }: { snapshot: LiveFootballSnapshot; onOpenPlayer?: (playerId: string) => void }) {
   const ready = snapshot.tacticSource === "live-memory" && snapshot.tactic != null;
   const objectDetected = snapshot.status.liveMemoryTacticRead === "object_detected_unmapped";
   const tacticObjectDetected = ready || objectDetected;
@@ -23,7 +23,7 @@ export function TacticsScreen({ snapshot }: { snapshot: LiveFootballSnapshot }) 
       </div>
 
       <div className="tactical-workspace-grid">
-        <TacticalBoard snapshot={snapshot} />
+        <TacticalBoard snapshot={snapshot} onOpenPlayer={onOpenPlayer} />
         <aside className="tactical-inspector">
           <section>
             <header><Cpu /><h2>Live tactic source</h2></header>

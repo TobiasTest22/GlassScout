@@ -340,10 +340,23 @@ export type IndexedPlayerSearchResult = {
   value?: string | null;
   wage?: string | null;
   contractStatus?: string | null;
+  contractRemaining?: string | null;
   averageRating?: number | null;
   minutesPlayed?: number | null;
   goals?: number | null;
   assists?: number | null;
+  transferInterest?: string | null;
+  loanInterest?: string | null;
+  transferAvailable?: boolean | null;
+  loanAvailable?: boolean | null;
+  per90?: Record<string, number | null>;
+  rawStats?: Record<string, number | null>;
+  inPossessionFit?: number | null;
+  outOfPossessionFit?: number | null;
+  projectedInPossessionFit?: number | null;
+  projectedOutOfPossessionFit?: number | null;
+  efficiencyScore?: number | null;
+  marketValueAmount?: number | null;
 };
 
 export async function searchIndexedPlayers(query: string): Promise<IndexedPlayerSearchResult[]> {
